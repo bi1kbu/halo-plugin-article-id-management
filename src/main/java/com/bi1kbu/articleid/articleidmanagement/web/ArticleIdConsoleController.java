@@ -67,4 +67,15 @@ public class ArticleIdConsoleController {
         String operator = principal != null ? principal.getName() : "system";
         return articleIdService.updateLedger(id, request, operator);
     }
+
+    @PostMapping("/ledger/{id}/mark-delete")
+    public Object markDelete(@PathVariable("id") String id, Principal principal) {
+        String operator = principal != null ? principal.getName() : "system";
+        return articleIdService.markDeleted(id, operator);
+    }
+
+    @GetMapping("/logs")
+    public Object logs() {
+        return articleIdService.logs();
+    }
 }

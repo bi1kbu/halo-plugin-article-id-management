@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from 'axios'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { utils } from '@halo-dev/ui-shared'
 
 type RuleOption = {
@@ -30,7 +30,21 @@ type LedgerItem = {
   remark?: string
 }
 
-type Mode = 'query' | 'create' | 'update' | 'manage'
+type OperationLog = {
+  id: string
+  action: string
+  operator: string
+  targetId?: string
+  targetCode?: string
+  detail?: string
+  createdAt: string
+}
+
+type Mode = 'query' | 'create' | 'update' | 'manage' | 'logs'
+type FilterOption = {
+  value: string
+  label: string
+}
 
 const props = defineProps<{
   mode?: Mode
@@ -43,12 +57,20 @@ const modeTitles: Record<Mode, string> = {
   create: '编号创建',
   update: '编号修改',
   manage: '规则管理',
+  logs: '操作日志',
 }
 const statusText: Record<string, string> = {
   REGISTERED: '已注册',
   BOUND: '已绑定',
   SUPERSEDED: '已替代',
   VOID: '已作废',
+  DELETED: '已删除',
+}
+const actionText: Record<string, string> = {
+  RULE_UPDATED: '规则更新',
+  LEDGER_REGISTERED: '编号注册',
+  LEDGER_UPDATED: '编号修改',
+  LEDGER_MARKED_DELETED: '标记删除',
 }
 
 const baseUrl = '/apis/api.article-id-management.console/v1'
@@ -57,6 +79,7 @@ const savingRule = ref(false)
 const previewing = ref(false)
 const registering = ref(false)
 const updatingLedger = ref(false)
+const deletingLedgerId = ref('')
 const message = ref('')
 
 const rules = ref<RuleConfig>({
@@ -102,6 +125,27 @@ const updatePick = ref({
 
 const previewCode = ref('')
 const ledger = ref<LedgerItem[]>([])
+const logs = ref<OperationLog[]>([])
+const ledgerFilter = ref({
+  deptCodes: [] as string[],
+  docTypes: [] as string[],
+  statuses: ['REGISTERED', 'BOUND', 'SUPERSEDED', 'VOID'] as string[],
+  keyword: '',
+})
+const logFilter = ref({
+  actions: [] as string[],
+  operators: [] as string[],
+  keyword: '',
+  start: '',
+  end: '',
+})
+const expandedFilterRows = ref<Record<string, boolean>>({
+  ledgerDept: false,
+  ledgerType: false,
+  ledgerStatus: false,
+  logAction: false,
+  logOperator: false,
+})
 
 const deptOptions = computed(() => rules.value.departments || [])
 const typeOptions = computed(() => rules.value.docTypes || [])
@@ -115,11 +159,84 @@ const relationOptions = computed(() =>
 const relationOptionsForUpdate = computed(() =>
   relationOptions.value.filter((item) => item.id !== updateForm.value.id),
 )
+const deptFilterOptions = computed<FilterOption[]>(() =>
+  deptOptions.value.map((item) => ({ value: item.code, label: `${item.code} · ${item.label}` })),
+)
+const typeFilterOptions = computed<FilterOption[]>(() =>
+  typeOptions.value.map((item) => ({ value: item.code, label: `${item.code} · ${item.label}` })),
+)
+const statusFilterOptions: FilterOption[] = [
+  { value: 'REGISTERED', label: '已注册' },
+  { value: 'BOUND', label: '已绑定' },
+  { value: 'SUPERSEDED', label: '已替代' },
+  { value: 'VOID', label: '已作废' },
+  { value: 'DELETED', label: '已删除' },
+]
+const actionFilterOptions = computed<FilterOption[]>(() =>
+  logActions.value.map((item) => ({ value: item, label: actionLabel(item) })),
+)
+const operatorFilterOptions = computed<FilterOption[]>(() =>
+  logOperators.value.map((item) => ({ value: item, label: item })),
+)
+const filteredLedger = computed(() => {
+  const deptCodes = ledgerFilter.value.deptCodes
+  const docTypes = ledgerFilter.value.docTypes
+  const statuses = ledgerFilter.value.statuses
+  const keyword = ledgerFilter.value.keyword.trim().toLowerCase()
+
+  return ledger.value.filter((item) => {
+    if (deptCodes.length > 0 && !deptCodes.includes(item.deptCode)) {
+      return false
+    }
+    if (docTypes.length > 0 && !docTypes.includes(item.docType)) {
+      return false
+    }
+    if (statuses.length > 0 && !statuses.includes(item.status)) {
+      return false
+    }
+    if (keyword && !item.fullCode.toLowerCase().includes(keyword)) {
+      return false
+    }
+    return true
+  })
+})
 
 const canView = computed(() => hasPermission(['article-id-management:view', 'article-id-management:create', 'article-id-management:modify', 'article-id-management:manage']))
 const canCreate = computed(() => hasPermission(['article-id-management:create', 'article-id-management:manage']))
 const canModify = computed(() => hasPermission(['article-id-management:modify', 'article-id-management:manage']))
 const canManage = computed(() => hasPermission(['article-id-management:manage']))
+const canOperate = computed(() => canModify.value || canManage.value)
+const logActions = computed(() => Array.from(new Set(logs.value.map((item) => item.action).filter(Boolean))))
+const logOperators = computed(() => Array.from(new Set(logs.value.map((item) => item.operator).filter(Boolean))))
+const filteredLogs = computed(() => {
+  const actions = logFilter.value.actions
+  const operators = logFilter.value.operators
+  const keyword = logFilter.value.keyword.trim().toLowerCase()
+  const startAt = logFilter.value.start ? new Date(`${logFilter.value.start}T00:00:00`).getTime() : null
+  const endAt = logFilter.value.end ? new Date(`${logFilter.value.end}T23:59:59`).getTime() : null
+
+  return logs.value.filter((item) => {
+    if (actions.length > 0 && !actions.includes(item.action)) {
+      return false
+    }
+    if (operators.length > 0 && !operators.includes(item.operator || '')) {
+      return false
+    }
+    if (keyword && !(item.targetCode || '').toLowerCase().includes(keyword)) {
+      return false
+    }
+    if (startAt || endAt) {
+      const current = new Date(item.createdAt).getTime()
+      if (startAt && current < startAt) {
+        return false
+      }
+      if (endAt && current > endAt) {
+        return false
+      }
+    }
+    return true
+  })
+})
 
 function hasPermission(permissions: string[]) {
   try {
@@ -150,6 +267,12 @@ const loadAll = async () => {
       docTypes: normalizeOptions(ruleResp.data.docTypes),
     }
     ledger.value = ledgerResp.data
+    try {
+      const logResp = await axios.get(`${baseUrl}/logs`)
+      logs.value = logResp.data
+    } catch {
+      logs.value = []
+    }
 
     if (!registerForm.value.deptCode && deptOptions.value.length > 0) {
       registerForm.value.deptCode = deptOptions.value[0].code
@@ -157,6 +280,8 @@ const loadAll = async () => {
     if (!registerForm.value.docType && typeOptions.value.length > 0) {
       registerForm.value.docType = typeOptions.value[0].code
     }
+  } catch (err: any) {
+    message.value = err?.response?.data?.message || '数据加载失败'
   } finally {
     loading.value = false
   }
@@ -278,7 +403,25 @@ const updateLedger = async () => {
   }
 }
 
+const markDeleted = async (item: LedgerItem) => {
+  deletingLedgerId.value = item.id
+  message.value = ''
+  try {
+    await axios.post(`${baseUrl}/ledger/${item.id}/mark-delete`)
+    message.value = '已标记删除'
+    if (updateForm.value.id === item.id) {
+      updateForm.value.status = 'DELETED'
+    }
+    await loadAll()
+  } catch (err: any) {
+    message.value = err?.response?.data?.message || '标记删除失败'
+  } finally {
+    deletingLedgerId.value = ''
+  }
+}
+
 const statusLabel = (status: string) => statusText[status] || status
+const actionLabel = (action: string) => actionText[action] || action
 const addRelation = (target: string[], code: string) => {
   const normalized = (code || '').trim()
   if (!normalized) return
@@ -301,6 +444,44 @@ const joinCodes = (arr?: string[]) => {
   const values = (arr || []).map((item) => item.trim()).filter(Boolean)
   return values.length > 0 ? values.join(',') : null
 }
+
+const resetLogFilter = () => {
+  logFilter.value = {
+    actions: [],
+    operators: [],
+    keyword: '',
+    start: '',
+    end: '',
+  }
+}
+const resetLedgerFilter = () => {
+  ledgerFilter.value = {
+    deptCodes: [],
+    docTypes: [],
+    statuses: ['REGISTERED', 'BOUND', 'SUPERSEDED', 'VOID'],
+    keyword: '',
+  }
+}
+
+const toggleFilterValue = (target: string[], value: string) => {
+  const idx = target.indexOf(value)
+  if (idx >= 0) {
+    target.splice(idx, 1)
+  } else {
+    target.push(value)
+  }
+}
+const isFilterValueSelected = (target: string[], value: string) => target.includes(value)
+const getVisibleFilterOptions = (_key: string, options: FilterOption[]) => options
+const getHiddenFilterCount = (key: string, options: FilterOption[]) =>
+  Math.max(0, options.length - getVisibleFilterOptions(key, options).length)
+const toggleFilterRowExpand = (key: string) => {
+  expandedFilterRows.value[key] = !expandedFilterRows.value[key]
+}
+
+watch(currentMode, () => {
+  message.value = ''
+})
 
 onMounted(loadAll)
 </script>
@@ -497,6 +678,7 @@ onMounted(loadAll)
             <option value="BOUND">已绑定</option>
             <option value="SUPERSEDED">已替代</option>
             <option value="VOID">已作废</option>
+            <option value="DELETED">已删除</option>
           </select>
         </label>
       </div>
@@ -562,8 +744,80 @@ onMounted(loadAll)
       <p class="hint">请先在下方台账列表点击“选中”后再修改。</p>
     </section>
 
-    <section v-if="canView || canCreate || canModify || canManage" class="card">
+    <section v-if="currentMode !== 'logs' && (canView || canCreate || canModify || canManage)" class="card">
       <h2>编号台账</h2>
+      <div class="filter-panel ledger-filter">
+        <div class="filter-row">
+          <div class="filter-title">部门</div>
+          <div class="filter-values" :class="{ expanded: expandedFilterRows.ledgerDept }">
+            <button
+              v-for="item in getVisibleFilterOptions('ledgerDept', deptFilterOptions)"
+              :key="`filter-dept-${item.value}`"
+              type="button"
+              class="filter-pill"
+              :class="{ active: isFilterValueSelected(ledgerFilter.deptCodes, item.value) }"
+              @click="toggleFilterValue(ledgerFilter.deptCodes, item.value)"
+            >
+              {{ item.label }}
+            </button>
+            <button
+              v-if="getHiddenFilterCount('ledgerDept', deptFilterOptions) > 0"
+              type="button"
+              class="filter-pill expand"
+              @click="toggleFilterRowExpand('ledgerDept')"
+            >
+              {{ expandedFilterRows.ledgerDept ? '收起' : `+${getHiddenFilterCount('ledgerDept', deptFilterOptions)}` }}
+            </button>
+          </div>
+        </div>
+        <div class="filter-row">
+          <div class="filter-title">文件类型</div>
+          <div class="filter-values" :class="{ expanded: expandedFilterRows.ledgerType }">
+            <button
+              v-for="item in getVisibleFilterOptions('ledgerType', typeFilterOptions)"
+              :key="`filter-type-${item.value}`"
+              type="button"
+              class="filter-pill"
+              :class="{ active: isFilterValueSelected(ledgerFilter.docTypes, item.value) }"
+              @click="toggleFilterValue(ledgerFilter.docTypes, item.value)"
+            >
+              {{ item.label }}
+            </button>
+            <button
+              v-if="getHiddenFilterCount('ledgerType', typeFilterOptions) > 0"
+              type="button"
+              class="filter-pill expand"
+              @click="toggleFilterRowExpand('ledgerType')"
+            >
+              {{ expandedFilterRows.ledgerType ? '收起' : `+${getHiddenFilterCount('ledgerType', typeFilterOptions)}` }}
+            </button>
+          </div>
+        </div>
+        <div class="filter-row">
+          <div class="filter-title">状态</div>
+          <div class="filter-values" :class="{ expanded: expandedFilterRows.ledgerStatus }">
+            <button
+              v-for="item in getVisibleFilterOptions('ledgerStatus', statusFilterOptions)"
+              :key="`filter-status-${item.value}`"
+              type="button"
+              class="filter-pill"
+              :class="{ active: isFilterValueSelected(ledgerFilter.statuses, item.value) }"
+              @click="toggleFilterValue(ledgerFilter.statuses, item.value)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="grid ledger-filter-inputs">
+        <label>
+          编号关键词
+          <input v-model="ledgerFilter.keyword" type="text" placeholder="输入编号关键字" />
+        </label>
+        <div class="ledger-filter-actions">
+          <button type="button" class="small" @click="resetLedgerFilter">重置筛选</button>
+        </div>
+      </div>
       <div v-if="loading">加载中...</div>
       <div v-else class="table-wrap">
         <table>
@@ -577,11 +831,11 @@ onMounted(loadAll)
               <th>被替代</th>
               <th>依赖</th>
               <th>创建时间</th>
-              <th v-if="canModify">操作</th>
+              <th v-if="canOperate">操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in ledger" :key="item.id">
+            <tr v-for="item in filteredLedger" :key="item.id">
               <td>{{ item.fullCode }}</td>
               <td>{{ item.deptCode }}</td>
               <td>{{ item.docType }}</td>
@@ -590,7 +844,113 @@ onMounted(loadAll)
               <td>{{ item.replacedByCode || '-' }}</td>
               <td>{{ item.dependencyCodes || '-' }}</td>
               <td>{{ item.createdAt }}</td>
-              <td v-if="canModify"><button class="small" @click="pickUpdateTarget(item)">选中</button></td>
+              <td v-if="canOperate" class="action-cell">
+                <button v-if="canModify" class="small" @click="pickUpdateTarget(item)">选中</button>
+                <button
+                  class="small danger"
+                  :disabled="item.status === 'DELETED' || deletingLedgerId === item.id"
+                  @click="markDeleted(item)"
+                >
+                  {{ deletingLedgerId === item.id ? '处理中...' : '标记删除' }}
+                </button>
+              </td>
+            </tr>
+            <tr v-if="filteredLedger.length === 0">
+              <td :colspan="canOperate ? 9 : 8">暂无数据</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section v-if="currentMode === 'logs' && (canView || canManage)" class="card">
+      <h2>操作日志</h2>
+      <div class="filter-panel log-filter">
+        <div class="filter-row">
+          <div class="filter-title">操作类型</div>
+          <div class="filter-values" :class="{ expanded: expandedFilterRows.logAction }">
+            <button
+              v-for="item in getVisibleFilterOptions('logAction', actionFilterOptions)"
+              :key="`log-action-${item.value}`"
+              type="button"
+              class="filter-pill"
+              :class="{ active: isFilterValueSelected(logFilter.actions, item.value) }"
+              @click="toggleFilterValue(logFilter.actions, item.value)"
+            >
+              {{ item.label }}
+            </button>
+            <button
+              v-if="getHiddenFilterCount('logAction', actionFilterOptions) > 0"
+              type="button"
+              class="filter-pill expand"
+              @click="toggleFilterRowExpand('logAction')"
+            >
+              {{ expandedFilterRows.logAction ? '收起' : `+${getHiddenFilterCount('logAction', actionFilterOptions)}` }}
+            </button>
+          </div>
+        </div>
+        <div class="filter-row">
+          <div class="filter-title">操作人</div>
+          <div class="filter-values" :class="{ expanded: expandedFilterRows.logOperator }">
+            <button
+              v-for="item in getVisibleFilterOptions('logOperator', operatorFilterOptions)"
+              :key="`log-operator-${item.value}`"
+              type="button"
+              class="filter-pill"
+              :class="{ active: isFilterValueSelected(logFilter.operators, item.value) }"
+              @click="toggleFilterValue(logFilter.operators, item.value)"
+            >
+              {{ item.label }}
+            </button>
+            <button
+              v-if="getHiddenFilterCount('logOperator', operatorFilterOptions) > 0"
+              type="button"
+              class="filter-pill expand"
+              @click="toggleFilterRowExpand('logOperator')"
+            >
+              {{ expandedFilterRows.logOperator ? '收起' : `+${getHiddenFilterCount('logOperator', operatorFilterOptions)}` }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="grid log-filter-inputs">
+        <label>
+          编号关键词
+          <input v-model="logFilter.keyword" type="text" placeholder="输入编号关键字" />
+        </label>
+        <label>
+          开始日期
+          <input v-model="logFilter.start" type="date" />
+        </label>
+        <label>
+          结束日期
+          <input v-model="logFilter.end" type="date" />
+        </label>
+        <div class="log-filter-actions">
+          <button type="button" class="small" @click="resetLogFilter">重置筛选</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>操作</th>
+              <th>编号</th>
+              <th>操作人</th>
+              <th>时间</th>
+              <th>详情</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in filteredLogs" :key="item.id">
+              <td>{{ actionLabel(item.action) }}</td>
+              <td>{{ item.targetCode || '-' }}</td>
+              <td>{{ item.operator || '-' }}</td>
+              <td>{{ item.createdAt }}</td>
+              <td>{{ item.detail || '-' }}</td>
+            </tr>
+            <tr v-if="filteredLogs.length === 0">
+              <td colspan="5">暂无日志</td>
             </tr>
           </tbody>
         </table>
@@ -604,46 +964,66 @@ onMounted(loadAll)
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 20px 24px;
-  color: #1f2937;
+  padding: 24px 28px;
+  color: #0f172a;
   min-height: 100vh;
   box-sizing: border-box;
+  font-size: 14px;
 }
 
 .page-header {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   width: 100%;
 }
 
 .page-header h1 {
   margin: 0;
-  font-size: 26px;
+  font-size: 30px;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .page-header p {
-  margin: 6px 0 0;
-  color: #4b5563;
+  margin: 8px 0 0;
+  color: #475569;
+  font-size: 14px;
 }
 
 .message {
   color: #0f766e;
-  margin: 8px 0 16px;
+  margin: 10px 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #ecfeff;
+  border: 1px solid #99f6e4;
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 
 .card {
-  background: #fff;
-  border: 1px solid #dbe4f0;
-  border-radius: 12px;
-  padding: 18px;
+  background: #ffffff;
+  border: 1px solid #d7dfeb;
+  border-radius: 14px;
+  padding: 20px;
   margin-bottom: 18px;
   width: 100%;
   box-sizing: border-box;
+  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.02), 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.card h2 {
+  margin: 0 0 14px;
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: #0b1220;
 }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
 .grid.compact {
@@ -653,17 +1033,19 @@ onMounted(loadAll)
 label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
   font-size: 13px;
+  font-weight: 600;
+  color: #334155;
 }
 
 .page :is(input:not([type='checkbox']), select, textarea) {
-  border: 2px solid #93c5fd !important;
+  border: 1px solid #c3d2e8 !important;
   border-radius: 10px !important;
-  padding: 0 12px !important;
+  padding: 0 13px !important;
   font-size: 14px;
-  background: #eff6ff !important;
-  color: #111827 !important;
+  background: #f8fbff !important;
+  color: #0f172a !important;
   box-sizing: border-box;
   box-shadow: none !important;
 }
@@ -686,13 +1068,14 @@ label {
 
 .page :is(input:not([type='checkbox']), select, textarea):focus {
   outline: none;
-  border-color: #2563eb !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14) !important;
 }
 
 .page input[readonly] {
-  background: #f8fafc !important;
-  border-color: #cbd5e1 !important;
+  background: #f1f5f9 !important;
+  border-color: #d1d9e6 !important;
+  color: #475569 !important;
 }
 
 .mono {
@@ -706,19 +1089,20 @@ label {
 }
 
 .actions {
-  margin-top: 12px;
+  margin-top: 14px;
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 .relation-picker {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+  align-items: center;
 }
 
 .chips {
-  margin-top: 6px;
+  margin-top: 8px;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -728,11 +1112,11 @@ label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid #93c5fd;
-  background: #dbeafe;
-  color: #1e3a8a;
+  border: 1px solid #bcd2ff;
+  background: #eaf2ff;
+  color: #87a3ff;
   border-radius: 999px;
-  padding: 4px 10px;
+  padding: 5px 10px;
   font-size: 12px;
   line-height: 1;
 }
@@ -740,7 +1124,7 @@ label {
 .chip-remove {
   border: 0;
   background: transparent;
-  color: #1e3a8a;
+  color: #87a3ff;
   font-size: 14px;
   line-height: 1;
   padding: 0;
@@ -748,38 +1132,67 @@ label {
 }
 
 button {
-  border: 0;
-  border-radius: 8px;
+  border: 1px solid #2563eb;
+  border-radius: 10px;
   background: #2563eb;
   color: #fff;
-  padding: 8px 14px;
+  padding: 9px 15px;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1;
   cursor: pointer;
+  transition: all 0.18s ease;
 }
 
+
 button:disabled {
-  opacity: 0.7;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
 button.small {
-  padding: 4px 10px;
+  padding: 6px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.relation-picker button.small {
+  min-width: 56px;
+  height: 44px;
+  line-height: 1;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+}
+
+.relation-picker select {
+  min-width: 0;
 }
 
 button.danger {
   background: #dc2626;
+  border-color: #dc2626;
+}
+
+button.danger:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
 }
 
 .option-editor-wrap {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   margin: 14px 0;
 }
 
 .option-editor {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 12px;
+  border: 1px solid #d9e1ee;
+  border-radius: 12px;
+  padding: 14px;
+  background: #fafcff;
 }
 
 .option-header {
@@ -791,7 +1204,9 @@ button.danger {
 
 .option-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
 }
 
 .option-list {
@@ -810,17 +1225,20 @@ button.danger {
 
 .preview {
   margin-top: 10px;
-  font-weight: 600;
+  font-weight: 700;
+  color: #1d4ed8;
 }
 
 .hint {
-  color: #6b7280;
+  color: #64748b;
   margin-top: 8px;
+  font-size: 12px;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 720px;
 }
 
 .table-wrap {
@@ -830,10 +1248,114 @@ table {
 
 th,
 td {
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e2e8f0;
   text-align: left;
-  padding: 10px 6px;
+  padding: 11px 8px;
   font-size: 13px;
+}
+
+th {
+  font-weight: 700;
+  color: #334155;
+  background: #f8fafc;
+}
+
+td {
+  color: #0f172a;
+}
+
+.action-cell {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.filter-panel {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px dashed #d7dfeb;
+  border-radius: 12px;
+  background: #fbfdff;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+
+.filter-row:last-child {
+  margin-bottom: 0;
+}
+
+.filter-title {
+  font-size: 13px;
+  line-height: 32px;
+  color: #334155;
+  font-weight: 700;
+}
+
+.filter-values {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+.filter-pill {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 9px;
+  height: 32px;
+  line-height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.filter-pill:hover {
+  border-color: #9bb8e9;
+  background: #d6e2fcff;
+}
+
+.filter-pill.active {
+  background: #e9f1ff;
+  border-color: #8db5ff;
+  color: #1e40af;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.1);
+}
+
+.filter-pill.expand {
+  background: #f6f8fc;
+  border-color: #d4dbe8;
+  color: #334155;
+}
+
+.ledger-filter {
+  margin-bottom: 12px;
+}
+
+.log-filter-inputs,
+.ledger-filter-inputs {
+  margin-bottom: 12px;
+}
+
+.log-filter-actions,
+.ledger-filter-actions {
+  display: flex;
+  align-items: flex-end;
+}
+
+.log-filter-actions button.small,
+.ledger-filter-actions button.small {
+  height: 44px;
+  min-height: 44px;
+  padding: 0 16px;
 }
 
 @media (max-width: 1000px) {
@@ -841,6 +1363,14 @@ td {
   .grid.compact,
   .option-editor-wrap {
     grid-template-columns: 1fr;
+  }
+
+  .filter-row {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-title {
+    line-height: 1.4;
   }
 
   .option-row {

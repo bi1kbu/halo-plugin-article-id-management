@@ -82,6 +82,21 @@ export default definePlugin({
               permissions: ['article-id-management:manage'],
             },
           },
+          {
+            path: 'logs',
+            name: 'ArticleIdManagementLogs',
+            component: HomeView,
+            props: { mode: 'logs' },
+            meta: {
+              title: '操作日志',
+              searchable: true,
+              menu: {
+                name: '操作日志',
+                priority: 50,
+              },
+              permissions: ['article-id-management:view'],
+            },
+          },
         ],
       },
     },

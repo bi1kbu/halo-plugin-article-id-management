@@ -2,6 +2,7 @@ package com.bi1kbu.articleid.articleidmanagement.service;
 
 import com.bi1kbu.articleid.articleidmanagement.domain.LedgerEntry;
 import com.bi1kbu.articleid.articleidmanagement.domain.LedgerStatus;
+import com.bi1kbu.articleid.articleidmanagement.domain.OperationLog;
 import com.bi1kbu.articleid.articleidmanagement.domain.RuleConfig;
 import com.bi1kbu.articleid.articleidmanagement.web.dto.GenerateRequest;
 import com.bi1kbu.articleid.articleidmanagement.web.dto.UpdateLedgerRequest;
@@ -32,6 +33,7 @@ public class ArticleIdService {
         validateRuleConfig(config);
         var state = storage.read();
         state.setRuleConfig(config);
+        appendLog(state, "RULE_UPDATED", "system", null, null, "更新编号规则配置");
         storage.write(state);
         return config;
     }
@@ -95,6 +97,7 @@ public class ArticleIdService {
             .remark(request.getRemark())
             .build();
         state.getLedger().add(entry);
+        appendLog(state, "LEDGER_REGISTERED", operator, entry.getId(), entry.getFullCode(), "注册新编号");
         storage.write(state);
         return entry;
     }
@@ -102,6 +105,12 @@ public class ArticleIdService {
     public List<LedgerEntry> list() {
         return storage.read().getLedger().stream()
             .sorted(Comparator.comparing(LedgerEntry::getCreatedAt).reversed())
+            .toList();
+    }
+
+    public List<OperationLog> logs() {
+        return storage.read().getLogs().stream()
+            .sorted(Comparator.comparing(OperationLog::getCreatedAt).reversed())
             .toList();
     }
 
@@ -129,6 +138,25 @@ public class ArticleIdService {
         }
         target.setUpdatedBy(operator);
         target.setUpdatedAt(OffsetDateTime.now());
+        appendLog(state, "LEDGER_UPDATED", operator, target.getId(), target.getFullCode(), "更新编号信息");
+        storage.write(state);
+        return target;
+    }
+
+    public LedgerEntry markDeleted(String id, String operator) {
+        var state = storage.read();
+        var target = state.getLedger().stream()
+            .filter(item -> Objects.equals(item.getId(), id))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("编号不存在: " + id));
+
+        if (target.getStatus() == LedgerStatus.DELETED) {
+            return target;
+        }
+        target.setStatus(LedgerStatus.DELETED);
+        target.setUpdatedBy(operator);
+        target.setUpdatedAt(OffsetDateTime.now());
+        appendLog(state, "LEDGER_MARKED_DELETED", operator, target.getId(), target.getFullCode(), "标记删除编号");
         storage.write(state);
         return target;
     }
@@ -225,5 +253,18 @@ public class ArticleIdService {
         if (unique != codes.size()) {
             throw new IllegalArgumentException(field + " 包含重复 code");
         }
+    }
+
+    private void appendLog(com.bi1kbu.articleid.articleidmanagement.domain.PluginState state, String action,
+        String operator, String targetId, String targetCode, String detail) {
+        state.getLogs().add(OperationLog.builder()
+            .id(UUID.randomUUID().toString())
+            .action(action)
+            .operator(operator)
+            .targetId(targetId)
+            .targetCode(targetCode)
+            .detail(detail)
+            .createdAt(OffsetDateTime.now())
+            .build());
     }
 }

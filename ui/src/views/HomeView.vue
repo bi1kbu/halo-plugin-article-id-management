@@ -37,6 +37,11 @@ type OperationLog = {
   targetId?: string
   targetCode?: string
   detail?: string
+  changes?: Array<{
+    field: string
+    fromValue?: string
+    toValue?: string
+  }>
   createdAt: string
 }
 
@@ -72,6 +77,7 @@ const actionText: Record<string, string> = {
   LEDGER_UPDATED: '编号修改',
   LEDGER_MARKED_DELETED: '标记删除',
 }
+const displayTimeZone = 'Asia/Shanghai'
 
 const baseUrl = '/apis/api.article-id-management.console/v1'
 const loading = ref(false)
@@ -81,6 +87,16 @@ const registering = ref(false)
 const updatingLedger = ref(false)
 const deletingLedgerId = ref('')
 const message = ref('')
+const expandedLedgerIds = ref<string[]>([])
+const expandedLogIds = ref<string[]>([])
+const ledgerPagination = ref({
+  page: 1,
+  pageSize: 25,
+})
+const logPagination = ref({
+  page: 1,
+  pageSize: 20,
+})
 
 const rules = ref<RuleConfig>({
   prefix: 'MS',
@@ -126,6 +142,8 @@ const updatePick = ref({
 const previewCode = ref('')
 const ledger = ref<LedgerItem[]>([])
 const logs = ref<OperationLog[]>([])
+const createdSessionLedger = ref<LedgerItem[]>([])
+const updateKeyword = ref('')
 const ledgerFilter = ref({
   deptCodes: [] as string[],
   docTypes: [] as string[],
@@ -200,12 +218,22 @@ const filteredLedger = computed(() => {
     return true
   })
 })
+const filteredUpdateLedger = computed(() => {
+  const keyword = updateKeyword.value.trim().toLowerCase()
+  if (!keyword) {
+    return ledger.value
+  }
+  return ledger.value.filter((item) => {
+    const text = [item.fullCode, item.deptCode, item.docType, statusLabel(item.status)].join(' ').toLowerCase()
+    return text.includes(keyword)
+  })
+})
+const selectedUpdateItem = computed(() => ledger.value.find((item) => item.id === updateForm.value.id) || null)
 
 const canView = computed(() => hasPermission(['article-id-management:view', 'article-id-management:create', 'article-id-management:modify', 'article-id-management:manage']))
 const canCreate = computed(() => hasPermission(['article-id-management:create', 'article-id-management:manage']))
 const canModify = computed(() => hasPermission(['article-id-management:modify', 'article-id-management:manage']))
 const canManage = computed(() => hasPermission(['article-id-management:manage']))
-const canOperate = computed(() => canModify.value || canManage.value)
 const logActions = computed(() => Array.from(new Set(logs.value.map((item) => item.action).filter(Boolean))))
 const logOperators = computed(() => Array.from(new Set(logs.value.map((item) => item.operator).filter(Boolean))))
 const filteredLogs = computed(() => {
@@ -237,6 +265,20 @@ const filteredLogs = computed(() => {
     return true
   })
 })
+const ledgerPageSizes = [10, 20, 25, 50, 100]
+const logPageSizes = [10, 20, 25, 50]
+const ledgerTotalPages = computed(() =>
+  Math.max(1, Math.ceil(filteredLedger.value.length / ledgerPagination.value.pageSize)),
+)
+const logTotalPages = computed(() => Math.max(1, Math.ceil(filteredLogs.value.length / logPagination.value.pageSize)))
+const pagedFilteredLedger = computed(() => {
+  const start = (ledgerPagination.value.page - 1) * ledgerPagination.value.pageSize
+  return filteredLedger.value.slice(start, start + ledgerPagination.value.pageSize)
+})
+const pagedFilteredLogs = computed(() => {
+  const start = (logPagination.value.page - 1) * logPagination.value.pageSize
+  return filteredLogs.value.slice(start, start + logPagination.value.pageSize)
+})
 
 function hasPermission(permissions: string[]) {
   try {
@@ -253,6 +295,24 @@ function normalizeOptions(items: Array<{ code?: string; label?: string; name?: s
   }))
 }
 
+function normalizeLedgerItem(item: any): LedgerItem | null {
+  if (!item || typeof item !== 'object' || !item.id || !item.fullCode) {
+    return null
+  }
+  return {
+    id: String(item.id),
+    fullCode: String(item.fullCode),
+    deptCode: String(item.deptCode || ''),
+    docType: String(item.docType || ''),
+    status: String(item.status || 'REGISTERED'),
+    createdAt: String(item.createdAt || ''),
+    replacesCode: item.replacesCode ? String(item.replacesCode) : '',
+    replacedByCode: item.replacedByCode ? String(item.replacedByCode) : '',
+    dependencyCodes: item.dependencyCodes ? String(item.dependencyCodes) : '',
+    remark: item.remark ? String(item.remark) : '',
+  }
+}
+
 const loadAll = async () => {
   loading.value = true
   try {
@@ -266,7 +326,9 @@ const loadAll = async () => {
       departments: normalizeOptions(ruleResp.data.departments),
       docTypes: normalizeOptions(ruleResp.data.docTypes),
     }
-    ledger.value = ledgerResp.data
+    ledger.value = Array.isArray(ledgerResp.data)
+      ? ledgerResp.data.map((item: any) => normalizeLedgerItem(item)).filter(Boolean) as LedgerItem[]
+      : []
     try {
       const logResp = await axios.get(`${baseUrl}/logs`)
       logs.value = logResp.data
@@ -349,7 +411,11 @@ const registerCode = async () => {
   registering.value = true
   message.value = ''
   try {
-    await axios.post(`${baseUrl}/ledger/register`, buildPayload())
+    const resp = await axios.post(`${baseUrl}/ledger/register`, buildPayload())
+    const created = normalizeLedgerItem(resp.data)
+    if (created) {
+      createdSessionLedger.value = [created, ...createdSessionLedger.value.filter((item) => item.id !== created.id)]
+    }
     message.value = '编号注册成功'
     previewCode.value = ''
     registerForm.value.serial = ''
@@ -422,6 +488,25 @@ const markDeleted = async (item: LedgerItem) => {
 
 const statusLabel = (status: string) => statusText[status] || status
 const actionLabel = (action: string) => actionText[action] || action
+const formatDateTime = (value?: string) => {
+  if (!value) {
+    return '-'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: displayTimeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
 const addRelation = (target: string[], code: string) => {
   const normalized = (code || '').trim()
   if (!normalized) return
@@ -440,6 +525,11 @@ const splitCodes = (text?: string) =>
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
+const hasRelation = (text?: string) => splitCodes(text).length > 0
+const relationText = (text?: string) => {
+  const codes = splitCodes(text)
+  return codes.length > 0 ? codes.join('，') : '-'
+}
 const joinCodes = (arr?: string[]) => {
   const values = (arr || []).map((item) => item.trim()).filter(Boolean)
   return values.length > 0 ? values.join(',') : null
@@ -453,7 +543,26 @@ const resetLogFilter = () => {
     start: '',
     end: '',
   }
+  logPagination.value.page = 1
 }
+const toggleLogDetail = (id: string) => {
+  const idx = expandedLogIds.value.indexOf(id)
+  if (idx >= 0) {
+    expandedLogIds.value.splice(idx, 1)
+  } else {
+    expandedLogIds.value.push(id)
+  }
+}
+const isLogExpanded = (id: string) => expandedLogIds.value.includes(id)
+const toggleLedgerDetail = (id: string) => {
+  const idx = expandedLedgerIds.value.indexOf(id)
+  if (idx >= 0) {
+    expandedLedgerIds.value.splice(idx, 1)
+  } else {
+    expandedLedgerIds.value.push(id)
+  }
+}
+const isLedgerExpanded = (id: string) => expandedLedgerIds.value.includes(id)
 const resetLedgerFilter = () => {
   ledgerFilter.value = {
     deptCodes: [],
@@ -461,6 +570,7 @@ const resetLedgerFilter = () => {
     statuses: ['REGISTERED', 'BOUND', 'SUPERSEDED', 'VOID'],
     keyword: '',
   }
+  ledgerPagination.value.page = 1
 }
 
 const toggleFilterValue = (target: string[], value: string) => {
@@ -478,10 +588,54 @@ const getHiddenFilterCount = (key: string, options: FilterOption[]) =>
 const toggleFilterRowExpand = (key: string) => {
   expandedFilterRows.value[key] = !expandedFilterRows.value[key]
 }
+const changeLedgerPage = (nextPage: number) => {
+  ledgerPagination.value.page = Math.min(Math.max(nextPage, 1), ledgerTotalPages.value)
+}
+const changeLogPage = (nextPage: number) => {
+  logPagination.value.page = Math.min(Math.max(nextPage, 1), logTotalPages.value)
+}
+const changeLedgerPageSize = (pageSize: number) => {
+  ledgerPagination.value.pageSize = pageSize
+  ledgerPagination.value.page = 1
+}
+const changeLogPageSize = (pageSize: number) => {
+  logPagination.value.pageSize = pageSize
+  logPagination.value.page = 1
+}
+const onLedgerPageSizeChange = (event: Event) => {
+  const value = Number((event.target as HTMLSelectElement).value)
+  if (!Number.isNaN(value)) {
+    changeLedgerPageSize(value)
+  }
+}
+const onLogPageSizeChange = (event: Event) => {
+  const value = Number((event.target as HTMLSelectElement).value)
+  if (!Number.isNaN(value)) {
+    changeLogPageSize(value)
+  }
+}
 
 watch(currentMode, () => {
   message.value = ''
+  expandedLedgerIds.value = []
+  expandedLogIds.value = []
 })
+watch(
+  () => [filteredLedger.value.length, ledgerPagination.value.pageSize],
+  () => {
+    if (ledgerPagination.value.page > ledgerTotalPages.value) {
+      ledgerPagination.value.page = ledgerTotalPages.value
+    }
+  },
+)
+watch(
+  () => [filteredLogs.value.length, logPagination.value.pageSize],
+  () => {
+    if (logPagination.value.page > logTotalPages.value) {
+      logPagination.value.page = logTotalPages.value
+    }
+  },
+)
 
 onMounted(loadAll)
 </script>
@@ -664,87 +818,169 @@ onMounted(loadAll)
       <p v-if="previewCode" class="preview">预览结果：{{ previewCode }}</p>
     </section>
 
-    <section v-if="currentMode === 'update' && canModify" class="card">
-      <h2>修改编号</h2>
-      <div class="grid compact">
-        <label>
-          记录 ID
-          <input v-model="updateForm.id" type="text" readonly />
-        </label>
-        <label>
-          状态
-          <select v-model="updateForm.status">
-            <option value="REGISTERED">已注册</option>
-            <option value="BOUND">已绑定</option>
-            <option value="SUPERSEDED">已替代</option>
-            <option value="VOID">已作废</option>
-            <option value="DELETED">已删除</option>
-          </select>
-        </label>
+    <section v-if="currentMode === 'create' && canCreate" class="card">
+      <h2>本次创建编号</h2>
+      <p class="hint">仅显示当前页面会话中新注册的编号，刷新页面后自动清空。</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>编号</th>
+              <th>部门</th>
+              <th>类型</th>
+              <th>状态</th>
+              <th>创建时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in createdSessionLedger" :key="`created-${item.id}`">
+              <td>{{ item.fullCode }}</td>
+              <td>{{ item.deptCode }}</td>
+              <td>{{ item.docType }}</td>
+              <td>{{ statusLabel(item.status) }}</td>
+              <td>{{ formatDateTime(item.createdAt) }}</td>
+            </tr>
+            <tr v-if="createdSessionLedger.length === 0">
+              <td colspan="5">暂无本次创建记录</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <label>
-        备注
-        <input v-model="updateForm.remark" type="text" />
-      </label>
-      <label>
-        替代（来源编号）
-        <div class="relation-picker">
-          <select v-model="updatePick.replacesCode">
-            <option value="">请选择编号</option>
-            <option v-for="option in relationOptionsForUpdate" :key="`u-rep-${option.id}`" :value="option.code">
-              {{ option.label }}
-            </option>
-          </select>
-          <button type="button" class="small" @click="addRelation(updateForm.replacesCode, updatePick.replacesCode)">添加</button>
-        </div>
-        <div class="chips">
-          <span v-for="code in updateForm.replacesCode" :key="`u-c-rep-${code}`" class="chip">
-            {{ code }}
-            <button type="button" class="chip-remove" @click="removeRelation(updateForm.replacesCode, code)">×</button>
-          </span>
-        </div>
-      </label>
-      <label>
-        被替代（去向编号）
-        <div class="relation-picker">
-          <select v-model="updatePick.replacedByCode">
-            <option value="">请选择编号</option>
-            <option v-for="option in relationOptionsForUpdate" :key="`u-repby-${option.id}`" :value="option.code">
-              {{ option.label }}
-            </option>
-          </select>
-          <button type="button" class="small" @click="addRelation(updateForm.replacedByCode, updatePick.replacedByCode)">添加</button>
-        </div>
-        <div class="chips">
-          <span v-for="code in updateForm.replacedByCode" :key="`u-c-repby-${code}`" class="chip">
-            {{ code }}
-            <button type="button" class="chip-remove" @click="removeRelation(updateForm.replacedByCode, code)">×</button>
-          </span>
-        </div>
-      </label>
-      <label>
-        依赖
-        <div class="relation-picker">
-          <select v-model="updatePick.dependencyCodes">
-            <option value="">请选择编号</option>
-            <option v-for="option in relationOptionsForUpdate" :key="`u-dep-${option.id}`" :value="option.code">
-              {{ option.label }}
-            </option>
-          </select>
-          <button type="button" class="small" @click="addRelation(updateForm.dependencyCodes, updatePick.dependencyCodes)">添加</button>
-        </div>
-        <div class="chips">
-          <span v-for="code in updateForm.dependencyCodes" :key="`u-c-dep-${code}`" class="chip">
-            {{ code }}
-            <button type="button" class="chip-remove" @click="removeRelation(updateForm.dependencyCodes, code)">×</button>
-          </span>
-        </div>
-      </label>
-      <button :disabled="updatingLedger" @click="updateLedger">{{ updatingLedger ? '更新中...' : '保存修改' }}</button>
-      <p class="hint">请先在下方台账列表点击“选中”后再修改。</p>
     </section>
 
-    <section v-if="currentMode !== 'logs' && (canView || canCreate || canModify || canManage)" class="card">
+    <section v-if="currentMode === 'update' && canModify" class="card">
+      <h2>编号修改</h2>
+      <div class="grid compact">
+        <label>
+          快速检索
+          <input v-model="updateKeyword" type="text" placeholder="按编号 / 部门 / 类型 / 状态检索" />
+        </label>
+      </div>
+      <div v-if="updateForm.id" class="update-detail-panel">
+        <h3>详细编辑：{{ selectedUpdateItem?.fullCode || updateForm.id }}</h3>
+        <div class="grid compact">
+          <label>
+            记录 ID
+            <input v-model="updateForm.id" type="text" readonly />
+          </label>
+          <label>
+            状态
+            <select v-model="updateForm.status">
+              <option value="REGISTERED">已注册</option>
+              <option value="BOUND">已绑定</option>
+              <option value="SUPERSEDED">已替代</option>
+              <option value="VOID">已作废</option>
+              <option value="DELETED">已删除</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          备注
+          <input v-model="updateForm.remark" type="text" />
+        </label>
+        <label>
+          替代（来源编号）
+          <div class="relation-picker">
+            <select v-model="updatePick.replacesCode">
+              <option value="">请选择编号</option>
+              <option v-for="option in relationOptionsForUpdate" :key="`u-rep-${option.id}`" :value="option.code">
+                {{ option.label }}
+              </option>
+            </select>
+            <button type="button" class="small" @click="addRelation(updateForm.replacesCode, updatePick.replacesCode)">添加</button>
+          </div>
+          <div class="chips">
+            <span v-for="code in updateForm.replacesCode" :key="`u-c-rep-${code}`" class="chip">
+              {{ code }}
+              <button type="button" class="chip-remove" @click="removeRelation(updateForm.replacesCode, code)">×</button>
+            </span>
+          </div>
+        </label>
+        <label>
+          被替代（去向编号）
+          <div class="relation-picker">
+            <select v-model="updatePick.replacedByCode">
+              <option value="">请选择编号</option>
+              <option v-for="option in relationOptionsForUpdate" :key="`u-repby-${option.id}`" :value="option.code">
+                {{ option.label }}
+              </option>
+            </select>
+            <button type="button" class="small" @click="addRelation(updateForm.replacedByCode, updatePick.replacedByCode)">添加</button>
+          </div>
+          <div class="chips">
+            <span v-for="code in updateForm.replacedByCode" :key="`u-c-repby-${code}`" class="chip">
+              {{ code }}
+              <button type="button" class="chip-remove" @click="removeRelation(updateForm.replacedByCode, code)">×</button>
+            </span>
+          </div>
+        </label>
+        <label>
+          依赖
+          <div class="relation-picker">
+            <select v-model="updatePick.dependencyCodes">
+              <option value="">请选择编号</option>
+              <option v-for="option in relationOptionsForUpdate" :key="`u-dep-${option.id}`" :value="option.code">
+                {{ option.label }}
+              </option>
+            </select>
+            <button type="button" class="small" @click="addRelation(updateForm.dependencyCodes, updatePick.dependencyCodes)">添加</button>
+          </div>
+          <div class="chips">
+            <span v-for="code in updateForm.dependencyCodes" :key="`u-c-dep-${code}`" class="chip">
+              {{ code }}
+              <button type="button" class="chip-remove" @click="removeRelation(updateForm.dependencyCodes, code)">×</button>
+            </span>
+          </div>
+        </label>
+        <div class="actions">
+          <button :disabled="updatingLedger" @click="updateLedger">{{ updatingLedger ? '更新中...' : '保存修改' }}</button>
+          <button
+            type="button"
+            class="danger"
+            :disabled="!selectedUpdateItem || selectedUpdateItem.status === 'DELETED' || deletingLedgerId === selectedUpdateItem.id"
+            @click="selectedUpdateItem && markDeleted(selectedUpdateItem)"
+          >
+            {{ deletingLedgerId === selectedUpdateItem?.id ? '处理中...' : '标记删除' }}
+          </button>
+        </div>
+      </div>
+      <p v-else class="hint">点击下方条目后进入详细编辑。</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>编号</th>
+              <th>部门</th>
+              <th>类型</th>
+              <th>状态</th>
+              <th>创建时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="item in filteredUpdateLedger"
+              :key="`update-ledger-${item.id}`"
+              class="simple-table-row"
+              :class="{ active: updateForm.id === item.id }"
+              @click="pickUpdateTarget(item)"
+            >
+              <td>{{ item.fullCode }}</td>
+              <td>{{ item.deptCode }}</td>
+              <td>{{ item.docType }}</td>
+              <td>{{ statusLabel(item.status) }}</td>
+              <td>{{ formatDateTime(item.createdAt) }}</td>
+              <td><button type="button" class="small">编辑</button></td>
+            </tr>
+            <tr v-if="filteredUpdateLedger.length === 0">
+              <td colspan="6">暂无可修改条目</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section v-if="currentMode === 'query' && (canView || canCreate || canModify || canManage)" class="card">
       <h2>编号台账</h2>
       <div class="filter-panel ledger-filter">
         <div class="filter-row">
@@ -831,35 +1067,53 @@ onMounted(loadAll)
               <th>被替代</th>
               <th>依赖</th>
               <th>创建时间</th>
-              <th v-if="canOperate">操作</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in filteredLedger" :key="item.id">
-              <td>{{ item.fullCode }}</td>
-              <td>{{ item.deptCode }}</td>
-              <td>{{ item.docType }}</td>
-              <td>{{ statusLabel(item.status) }}</td>
-              <td>{{ item.replacesCode || '-' }}</td>
-              <td>{{ item.replacedByCode || '-' }}</td>
-              <td>{{ item.dependencyCodes || '-' }}</td>
-              <td>{{ item.createdAt }}</td>
-              <td v-if="canOperate" class="action-cell">
-                <button v-if="canModify" class="small" @click="pickUpdateTarget(item)">选中</button>
-                <button
-                  class="small danger"
-                  :disabled="item.status === 'DELETED' || deletingLedgerId === item.id"
-                  @click="markDeleted(item)"
-                >
-                  {{ deletingLedgerId === item.id ? '处理中...' : '标记删除' }}
-                </button>
-              </td>
-            </tr>
+            <template v-for="item in pagedFilteredLedger" :key="item.id">
+              <tr class="ledger-main-row" :class="{ expanded: isLedgerExpanded(item.id) }" @click="toggleLedgerDetail(item.id)">
+                <td>{{ item.fullCode }}</td>
+                <td>{{ item.deptCode }}</td>
+                <td>{{ item.docType }}</td>
+                <td>{{ statusLabel(item.status) }}</td>
+                <td class="icon-cell"><span class="relation-dot" :class="{ active: hasRelation(item.replacesCode) }">{{ hasRelation(item.replacesCode) ? '●' : '○' }}</span></td>
+                <td class="icon-cell"><span class="relation-dot" :class="{ active: hasRelation(item.replacedByCode) }">{{ hasRelation(item.replacedByCode) ? '●' : '○' }}</span></td>
+                <td class="icon-cell"><span class="relation-dot" :class="{ active: hasRelation(item.dependencyCodes) }">{{ hasRelation(item.dependencyCodes) ? '●' : '○' }}</span></td>
+                <td>{{ formatDateTime(item.createdAt) }}</td>
+              </tr>
+              <tr v-if="isLedgerExpanded(item.id)" class="ledger-detail-row">
+                <td colspan="8">
+                  <div class="ledger-detail-wrap">
+                    <p><strong>替代：</strong>{{ relationText(item.replacesCode) }}</p>
+                    <p><strong>被替代：</strong>{{ relationText(item.replacedByCode) }}</p>
+                    <p><strong>依赖：</strong>{{ relationText(item.dependencyCodes) }}</p>
+                    <p><strong>备注：</strong>{{ item.remark || '-' }}</p>
+                  </div>
+                </td>
+              </tr>
+            </template>
             <tr v-if="filteredLedger.length === 0">
-              <td :colspan="canOperate ? 9 : 8">暂无数据</td>
+              <td colspan="8">暂无数据</td>
             </tr>
           </tbody>
         </table>
+      </div>
+      <div v-if="filteredLedger.length > 0" class="pager">
+        <div class="pager-left">
+          <span>共 {{ filteredLedger.length }} 条</span>
+          <div class="pager-size">
+            <span>每页</span>
+            <select :value="ledgerPagination.pageSize" @change="onLedgerPageSizeChange">
+              <option v-for="size in ledgerPageSizes" :key="`ledger-size-${size}`" :value="size">{{ size }}</option>
+            </select>
+            <span>条</span>
+          </div>
+        </div>
+        <div class="pager-right">
+          <button type="button" class="small ghost" :disabled="ledgerPagination.page <= 1" @click="changeLedgerPage(ledgerPagination.page - 1)">上一页</button>
+          <span class="pager-info">{{ ledgerPagination.page }} / {{ ledgerTotalPages }}</span>
+          <button type="button" class="small ghost" :disabled="ledgerPagination.page >= ledgerTotalPages" @click="changeLedgerPage(ledgerPagination.page + 1)">下一页</button>
+        </div>
       </div>
     </section>
 
@@ -938,22 +1192,64 @@ onMounted(loadAll)
               <th>编号</th>
               <th>操作人</th>
               <th>时间</th>
-              <th>详情</th>
+              <th>摘要</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="item in filteredLogs" :key="item.id">
+            <template v-for="item in pagedFilteredLogs" :key="item.id">
+              <tr class="log-main-row" :class="{ expanded: isLogExpanded(item.id) }" @click="toggleLogDetail(item.id)">
               <td>{{ actionLabel(item.action) }}</td>
               <td>{{ item.targetCode || '-' }}</td>
               <td>{{ item.operator || '-' }}</td>
-              <td>{{ item.createdAt }}</td>
+              <td>{{ formatDateTime(item.createdAt) }}</td>
               <td>{{ item.detail || '-' }}</td>
-            </tr>
+              </tr>
+              <tr v-if="isLogExpanded(item.id)" class="log-detail-row">
+                <td colspan="5">
+                  <div class="log-detail-wrap">
+                    <div v-if="!item.changes || item.changes.length === 0" class="log-detail-empty">暂无字段级明细</div>
+                    <table v-else class="log-detail-table">
+                      <thead>
+                        <tr>
+                          <th>字段</th>
+                          <th>原值</th>
+                          <th>新值</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="(change, idx) in item.changes" :key="`${item.id}-change-${idx}`">
+                          <td>{{ change.field }}</td>
+                          <td>{{ change.fromValue || '-' }}</td>
+                          <td>{{ change.toValue || '-' }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </td>
+              </tr>
+            </template>
             <tr v-if="filteredLogs.length === 0">
               <td colspan="5">暂无日志</td>
             </tr>
           </tbody>
         </table>
+      </div>
+      <div v-if="filteredLogs.length > 0" class="pager">
+        <div class="pager-left">
+          <span>共 {{ filteredLogs.length }} 条</span>
+          <div class="pager-size">
+            <span>每页</span>
+            <select :value="logPagination.pageSize" @change="onLogPageSizeChange">
+              <option v-for="size in logPageSizes" :key="`log-size-${size}`" :value="size">{{ size }}</option>
+            </select>
+            <span>条</span>
+          </div>
+        </div>
+        <div class="pager-right">
+          <button type="button" class="small ghost" :disabled="logPagination.page <= 1" @click="changeLogPage(logPagination.page - 1)">上一页</button>
+          <span class="pager-info">{{ logPagination.page }} / {{ logTotalPages }}</span>
+          <button type="button" class="small ghost" :disabled="logPagination.page >= logTotalPages" @click="changeLogPage(logPagination.page + 1)">下一页</button>
+        </div>
       </div>
     </section>
   </div>
@@ -1223,6 +1519,14 @@ button.danger:hover:not(:disabled) {
   gap: 8px;
 }
 
+.page .option-row input {
+  height: 30px !important;
+  min-height: 30px !important;
+  line-height: 28px !important;
+  padding: 0 10px !important;
+  font-size: 13px !important;
+}
+
 .preview {
   margin-top: 10px;
   font-weight: 700;
@@ -1264,10 +1568,78 @@ td {
   color: #0f172a;
 }
 
+.simple-table-row {
+  cursor: pointer;
+}
+
+.simple-table-row:hover {
+  background: #f8fbff;
+}
+
+.simple-table-row.active {
+  background: #edf4ff;
+}
+
+.update-detail-panel {
+  margin-top: 16px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 14px;
+}
+
+.update-detail-panel h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
 .action-cell {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.icon-cell {
+  text-align: center;
+  width: 64px;
+}
+
+.relation-dot {
+  font-size: 16px;
+  color: #94a3b8;
+  line-height: 1;
+}
+
+.relation-dot.active {
+  color: #2563eb;
+}
+
+.ledger-main-row {
+  cursor: pointer;
+}
+
+.ledger-main-row:hover td {
+  background: #f8fbff;
+}
+
+.ledger-main-row.expanded td {
+  background: #eff6ff;
+}
+
+.ledger-detail-row td {
+  background: #f8fbff;
+}
+
+.ledger-detail-wrap {
+  display: grid;
+  gap: 6px;
+  padding: 4px 2px;
+  color: #334155;
+  font-size: 12px;
+}
+
+.ledger-detail-wrap p {
+  margin: 0;
 }
 
 .filter-panel {
@@ -1356,6 +1728,94 @@ td {
   height: 44px;
   min-height: 44px;
   padding: 0 16px;
+}
+
+.log-detail-row td {
+  background: #f8fbff;
+  border-bottom: 1px solid #dbe5f4;
+}
+
+.log-main-row {
+  cursor: pointer;
+}
+
+.log-main-row:hover td {
+  background: #f8fbff;
+}
+
+.log-main-row.expanded td {
+  background: #f4f8ff;
+}
+
+.log-detail-wrap {
+  padding: 8px 2px 10px;
+}
+
+.log-detail-empty {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.log-detail-table {
+  width: 100%;
+  min-width: 0;
+  border-collapse: collapse;
+}
+
+.log-detail-table th,
+.log-detail-table td {
+  padding: 8px 8px;
+  font-size: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.log-detail-table th {
+  background: #eef4ff;
+  color: #334155;
+  font-weight: 700;
+}
+
+.pager {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pager-left,
+.pager-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pager-size {
+  display: inline-flex;
+  align-items: center;
+  flex-direction: row;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.page .pager-size select {
+  height: 22px !important;
+  min-height: 22px !important;
+  line-height: 20px !important;
+  border-radius: 8px !important;
+  padding: 0 6px !important;
+  min-width: 64px;
+  font-size: 12px;
+}
+
+.pager-info {
+  font-size: 12px;
+  color: #475569;
+  min-width: 52px;
+  text-align: center;
 }
 
 @media (max-width: 1000px) {

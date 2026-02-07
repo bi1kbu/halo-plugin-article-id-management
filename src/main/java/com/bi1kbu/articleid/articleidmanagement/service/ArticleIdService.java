@@ -3,12 +3,14 @@ package com.bi1kbu.articleid.articleidmanagement.service;
 import com.bi1kbu.articleid.articleidmanagement.domain.LedgerEntry;
 import com.bi1kbu.articleid.articleidmanagement.domain.LedgerStatus;
 import com.bi1kbu.articleid.articleidmanagement.domain.OperationLog;
+import com.bi1kbu.articleid.articleidmanagement.domain.OperationLogChange;
 import com.bi1kbu.articleid.articleidmanagement.domain.RuleConfig;
 import com.bi1kbu.articleid.articleidmanagement.web.dto.GenerateRequest;
 import com.bi1kbu.articleid.articleidmanagement.web.dto.UpdateLedgerRequest;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,7 +35,7 @@ public class ArticleIdService {
         validateRuleConfig(config);
         var state = storage.read();
         state.setRuleConfig(config);
-        appendLog(state, "RULE_UPDATED", "system", null, null, "更新编号规则配置");
+        appendLog(state, "RULE_UPDATED", "system", null, null, "更新编号规则配置", List.of());
         storage.write(state);
         return config;
     }
@@ -97,7 +99,7 @@ public class ArticleIdService {
             .remark(request.getRemark())
             .build();
         state.getLedger().add(entry);
-        appendLog(state, "LEDGER_REGISTERED", operator, entry.getId(), entry.getFullCode(), "注册新编号");
+        appendLog(state, "LEDGER_REGISTERED", operator, entry.getId(), entry.getFullCode(), "注册新编号", List.of());
         storage.write(state);
         return entry;
     }
@@ -120,25 +122,39 @@ public class ArticleIdService {
             .filter(item -> Objects.equals(item.getId(), id))
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("编号不存在: " + id));
+        var changes = new ArrayList<OperationLogChange>();
 
         if (request.getStatus() != null) {
+            appendFieldChange(changes, "状态", target.getStatus() != null ? target.getStatus().name() : null,
+                request.getStatus().name());
             target.setStatus(request.getStatus());
         }
         if (request.getReplacesCode() != null) {
+            appendFieldChange(changes, "替代", target.getReplacesCode(), request.getReplacesCode());
             target.setReplacesCode(request.getReplacesCode());
         }
         if (request.getReplacedByCode() != null) {
+            appendFieldChange(changes, "被替代", target.getReplacedByCode(), request.getReplacedByCode());
             target.setReplacedByCode(request.getReplacedByCode());
         }
         if (request.getDependencyCodes() != null) {
+            appendFieldChange(changes, "依赖", target.getDependencyCodes(), request.getDependencyCodes());
             target.setDependencyCodes(request.getDependencyCodes());
         }
         if (request.getRemark() != null) {
+            appendFieldChange(changes, "备注", target.getRemark(), request.getRemark());
             target.setRemark(request.getRemark());
         }
         target.setUpdatedBy(operator);
         target.setUpdatedAt(OffsetDateTime.now());
-        appendLog(state, "LEDGER_UPDATED", operator, target.getId(), target.getFullCode(), "更新编号信息");
+        if (changes.isEmpty()) {
+            changes.add(OperationLogChange.builder()
+                .field("无字段变化")
+                .fromValue("-")
+                .toValue("-")
+                .build());
+        }
+        appendLog(state, "LEDGER_UPDATED", operator, target.getId(), target.getFullCode(), "更新编号信息", changes);
         storage.write(state);
         return target;
     }
@@ -153,10 +169,16 @@ public class ArticleIdService {
         if (target.getStatus() == LedgerStatus.DELETED) {
             return target;
         }
+        var beforeStatus = target.getStatus();
         target.setStatus(LedgerStatus.DELETED);
         target.setUpdatedBy(operator);
         target.setUpdatedAt(OffsetDateTime.now());
-        appendLog(state, "LEDGER_MARKED_DELETED", operator, target.getId(), target.getFullCode(), "标记删除编号");
+        appendLog(state, "LEDGER_MARKED_DELETED", operator, target.getId(), target.getFullCode(), "标记删除编号",
+            List.of(OperationLogChange.builder()
+                .field("状态")
+                .fromValue(beforeStatus != null ? beforeStatus.name() : "-")
+                .toValue(LedgerStatus.DELETED.name())
+                .build()));
         storage.write(state);
         return target;
     }
@@ -256,7 +278,7 @@ public class ArticleIdService {
     }
 
     private void appendLog(com.bi1kbu.articleid.articleidmanagement.domain.PluginState state, String action,
-        String operator, String targetId, String targetCode, String detail) {
+        String operator, String targetId, String targetCode, String detail, List<OperationLogChange> changes) {
         state.getLogs().add(OperationLog.builder()
             .id(UUID.randomUUID().toString())
             .action(action)
@@ -264,7 +286,28 @@ public class ArticleIdService {
             .targetId(targetId)
             .targetCode(targetCode)
             .detail(detail)
+            .changes(changes != null ? changes : List.of())
             .createdAt(OffsetDateTime.now())
             .build());
+    }
+
+    private void appendFieldChange(List<OperationLogChange> changes, String field, String fromValue, String toValue) {
+        String normalizedFrom = normalizeEmpty(fromValue);
+        String normalizedTo = normalizeEmpty(toValue);
+        if (Objects.equals(normalizedFrom, normalizedTo)) {
+            return;
+        }
+        changes.add(OperationLogChange.builder()
+            .field(field)
+            .fromValue(normalizedFrom)
+            .toValue(normalizedTo)
+            .build());
+    }
+
+    private String normalizeEmpty(String value) {
+        if (value == null || value.isBlank()) {
+            return "-";
+        }
+        return value;
     }
 }

@@ -1,5 +1,7 @@
 package com.bi1kbu.articleid.articleidmanagement;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import run.halo.app.plugin.BasePlugin;
 import run.halo.app.plugin.PluginContext;
@@ -14,6 +16,7 @@ import run.halo.app.plugin.PluginContext;
  */
 @Component
 public class ArticleIdManagementPlugin extends BasePlugin {
+    private static final Logger log = LoggerFactory.getLogger(ArticleIdManagementPlugin.class);
 
     public ArticleIdManagementPlugin(PluginContext pluginContext) {
         super(pluginContext);
@@ -21,11 +24,11 @@ public class ArticleIdManagementPlugin extends BasePlugin {
 
     @Override
     public void start() {
-        System.out.println("插件启动成功！");
+        log.info("Article ID Management plugin started");
     }
 
     @Override
     public void stop() {
-        System.out.println("插件停止！");
+        log.info("Article ID Management plugin stopped");
     }
 }

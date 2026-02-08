@@ -5,6 +5,7 @@
 每次完成代码修改后，必须执行以下步骤：
 
 1. 重新打包插件 JAR  
+   - 每次插件打包前都递增版本号 `+0.0.1`（例如 `1.0.7` -> `1.0.8`），再执行打包与后台更新。
    - 在插件目录执行：`./gradlew.bat build`
    - 确认产物位于：`build/libs/plugin-article-id-management-*.jar`
 

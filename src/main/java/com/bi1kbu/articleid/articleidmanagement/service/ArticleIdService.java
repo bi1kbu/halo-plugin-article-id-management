@@ -6,6 +6,7 @@ import com.bi1kbu.articleid.articleidmanagement.domain.OperationLog;
 import com.bi1kbu.articleid.articleidmanagement.domain.OperationLogChange;
 import com.bi1kbu.articleid.articleidmanagement.domain.RuleConfig;
 import com.bi1kbu.articleid.articleidmanagement.domain.RuleOption;
+import com.bi1kbu.articleid.articleidmanagement.search.ArticleIdSearchDocumentMapper;
 import com.bi1kbu.articleid.articleidmanagement.web.dto.GenerateRequest;
 import com.bi1kbu.articleid.articleidmanagement.web.dto.UpdateLedgerRequest;
 import java.time.OffsetDateTime;
@@ -23,9 +24,11 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import run.halo.app.core.extension.content.Post;
 import run.halo.app.extension.ReactiveExtensionClient;
+import run.halo.app.search.event.HaloDocumentAddRequestEvent;
 
 @Service
 public class ArticleIdService {
@@ -42,10 +45,13 @@ public class ArticleIdService {
 
     private final StateStorage storage;
     private final ReactiveExtensionClient extensionClient;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public ArticleIdService(StateStorage storage, ReactiveExtensionClient extensionClient) {
+    public ArticleIdService(StateStorage storage, ReactiveExtensionClient extensionClient,
+        ApplicationEventPublisher eventPublisher) {
         this.storage = storage;
         this.extensionClient = extensionClient;
+        this.eventPublisher = eventPublisher;
     }
 
     public RuleConfig getRuleConfig() {
@@ -139,6 +145,7 @@ public class ArticleIdService {
         appendLog(state, "LEDGER_REGISTERED", operator, entry.getId(), entry.getFullCode(), "注册新编号", List.of());
         syncPostAnnotations(null, entry, config);
         storage.write(state);
+        publishDocumentUpsert(entry);
         return entry;
     }
 
@@ -247,6 +254,7 @@ public class ArticleIdService {
         appendLog(state, "LEDGER_UPDATED", operator, target.getId(), target.getFullCode(), "更新编号信息", changes);
         syncPostAnnotations(oldArticleName, target, state.getRuleConfig());
         storage.write(state);
+        publishDocumentUpsert(target);
         return target;
     }
 
@@ -272,6 +280,7 @@ public class ArticleIdService {
                 .build()));
         syncPostAnnotations(target.getArticleName(), target, state.getRuleConfig());
         storage.write(state);
+        publishDocumentUpsert(target);
         return target;
     }
 
@@ -628,5 +637,14 @@ public class ArticleIdService {
             return field;
         }
         return field + "[自动]";
+    }
+
+    private void publishDocumentUpsert(LedgerEntry entry) {
+        try {
+            var document = ArticleIdSearchDocumentMapper.toDocument(entry);
+            eventPublisher.publishEvent(new HaloDocumentAddRequestEvent(this, List.of(document)));
+        } catch (Exception ex) {
+            log.warn("发布索引增量事件失败, ledgerId={}", entry != null ? entry.getId() : "null", ex);
+        }
     }
 }

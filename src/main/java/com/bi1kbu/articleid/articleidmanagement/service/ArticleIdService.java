@@ -198,6 +198,7 @@ public class ArticleIdService {
             .filter(item -> Objects.equals(item.getId(), id))
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("编号不存在: " + id));
+        var beforeStatus = target.getStatus();
         var oldArticleName = target.getArticleName();
         var autoRefreshBinding = Boolean.TRUE.equals(request.getAutoRefreshBinding());
         var changes = new ArrayList<OperationLogChange>();
@@ -268,7 +269,8 @@ public class ArticleIdService {
             appendFieldChange(changes, "作废日期", target.getVoidDate(), today);
             target.setVoidDate(today);
         }
-        if (request.getStatus() == null) {
+        boolean statusUnchanged = Objects.equals(beforeStatus, target.getStatus());
+        if (request.getStatus() == null || statusUnchanged) {
             autoAdjustStatusByBinding(target, changes);
         }
         // 保存时尝试按绑定对象刷新标题/链接/发布日期，避免台账信息滞后

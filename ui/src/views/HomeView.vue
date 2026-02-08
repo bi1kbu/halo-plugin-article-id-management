@@ -663,11 +663,12 @@ const updateLedger = async () => {
         autoRefreshBinding = true
       }
     }
-    const resp = await axios.patch(`${baseUrl}/ledger/${updateForm.value.id}`, {
-      status: updateForm.value.status,
-      replacesCode: joinCodes(updateForm.value.replacesCode),
-      replacedByCode: joinCodes(updateForm.value.replacedByCode),
-      dependencyCodes: joinCodes(updateForm.value.dependencyCodes),
+    const currentItem = selectedUpdateItem.value
+    const payload: Record<string, unknown> = {
+      // 更新场景下需要显式传空字符串，确保“清空关系字段”会被后端持久化。
+      replacesCode: joinCodes(updateForm.value.replacesCode) ?? '',
+      replacedByCode: joinCodes(updateForm.value.replacedByCode) ?? '',
+      dependencyCodes: joinCodes(updateForm.value.dependencyCodes) ?? '',
       remark: updateForm.value.remark,
       articleName: updateForm.value.articleName || null,
       articleTitle: updateForm.value.articleTitle || null,
@@ -677,7 +678,11 @@ const updateLedger = async () => {
       effectiveDate: updateForm.value.effectiveDate || null,
       supersededDate: updateForm.value.supersededDate || null,
       voidDate: updateForm.value.voidDate || null,
-    })
+    }
+    if (updateForm.value.status && updateForm.value.status !== (currentItem?.status || '')) {
+      payload.status = updateForm.value.status
+    }
+    const resp = await axios.patch(`${baseUrl}/ledger/${updateForm.value.id}`, payload)
     message.value = '编号更新成功'
     await loadAll()
     const saved = normalizeLedgerItem(resp.data)

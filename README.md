@@ -1,159 +1,145 @@
 # article-id-management
 
-Halo 2 插件：文章编号台账与分配管理（SOP 编号规则）。
+Halo 2 插件：文件编号台账管理、编号规则配置、绑定关系维护、操作审计与主题联动展示。
 
-## 1. 目标
+## 功能概览
 
-1. 在插件后台先注册编号，形成“可分配编号池”。
-2. 创建/编辑文章时，只能选择“未使用编号”进行绑定。
-3. 建立可审计、可筛选、不可回收复用的编号台账。
-4. 支持按权限分层操作：完全管理、修改、创建、访问。
+1. 编号规则管理
+- 支持前缀、流水号位数、是否按年份重置、编号显示规则（占位符）配置。
+- 支持部门编码与文件类型字典配置（`code + label`）。
 
-## 2. 编号规则（V1）
+2. 编号注册与台账
+- 先注册编号，再绑定内容。
+- 支持 `serial/sub/rev` 组合生成编号，`Rev` 可手动指定。
+- 台账支持筛选、分页、状态管理、依赖/替代关系维护。
 
-默认格式：
+3. 绑定信息管理
+- 支持绑定对象名称、标题、链接、发布日期快照。
+- 支持保存时自动刷新绑定信息快照（标题/链接/发布日期）。
+- 已绑定对象不可重复被其他编号占用。
 
-`MS-{dept}/{type}-{serial[.sub]}/{year}[.RevN]`
+4. 状态与审计
+- 状态：`REGISTERED`、`BOUND`、`SUPERSEDED`、`VOID`、`DELETED`。
+- 显示态支持动态拆分：`BOUND_PENDING`（即将生效）、`BOUND_EFFECTIVE`（现行有效）。
+- 全量操作日志（操作人、时间、摘要、字段变更）。
 
-示例：
+5. 权限模型
+- 四级权限模板：查看、创建、修改、完全管理。
+- 前端菜单按权限显示。
 
-- `MS-A/Res-0001/2025`
-- `MS-A/Res-0002/2025.Rev1`
-- `MS-A/SR-0003.1/2025`
-- `MS-P/Res-0001.105/2026`
+6. 主题联动
+- Post 场景：回写 `metadata.annotations`。
+- Docs/非 Post 场景：提供按 URL 查询的公开接口，主题可前端拉取渲染。
 
-规则口径：
+## 编号规则
 
-1. 流水号按 `部门 + 年份` 递增，每自然年重置。
-2. `sub`（子文件号）可选，仅在打包/文件夹场景使用。
-3. `Rev`（修订号）可选，且允许手动指定。
-4. 文章删除或改回草稿后，已绑定编号不回收复用。
+默认规则表达式（可配置）：
 
-## 3. 存储策略
+`{prefix}-{dept}/{type}-{serial}{subPart}/{year}{revPart}`
 
-采用“台账主存 + 文章 annotations 回写”。
+常见示例：
+- `MS-A/Res-0001/2026`
+- `MS-A/Res-0002/2026.Rev1`
+- `MS-A/SR-0003.1/2026`
 
-1. 台账表是业务真相（状态、绑定关系、审计信息）。
-2. 文章 `metadata.annotations` 回写编号，便于检索/主题展示。
+占位符支持中英双套：
+- 英文：`{prefix} {dept} {type} {serial} {sub} {year} {rev} {subPart} {revPart}`
+- 中文：`{前缀} {部门编码} {文件类型} {流水号} {子文件号} {年份} {修订号} {子文件片段} {修订片段}`
 
-建议 annotation 键：
+## 注解键约定（Post 场景）
 
-- `run.halo.article-id-management/code`
-- `run.halo.article-id-management/ledger-id`
+插件维护以下注解键：
+- `article-id-management/fullCode`
+- `article-id-management/status`
+- `article-id-management/ledgerId`
+- `article-id-management/effectiveDate`
+- `article-id-management/supersededDate`
+- `article-id-management/voidDate`
+- `article-id-management/issuingAuthority`
+- `article-id-management/issuingAgency`
+- `fileNumber`
 
-## 4. 权限模型
+## API
 
-1. `view`：查看编号与筛选查询。
-2. `create`：创建新编号、创建修订编号。
-3. `modify`：在原有基础上修改编号信息。
-4. `manage`：增删改查 + 规则配置 + 作废/解绑等完全管理。
+### Console API
 
-继承关系：`manage > modify > create > view`
+Base: `/apis/api.article-id-management.console/v1`
 
-## 5. 核心流程
+- `GET /rules` 获取规则
+- `PUT /rules` 更新规则
+- `POST /ledger/preview` 预览编号
+- `POST /ledger/register` 注册编号
+- `GET /ledger` 台账列表
+- `PATCH /ledger/{id}` 修改台账条目
+- `POST /ledger/{id}/mark-delete` 标记删除
+- `GET /logs` 操作日志
 
-### 5.1 注册编号（插件后台页面）
+### Public API（主题联动）
 
-1. 选择部门、类型、年份。
-2. 输入/自动计算流水号，按需填写子文件号与 Rev。
-3. 生成完整编号并入台账，状态为 `REGISTERED`。
+Base: `/apis/api.article-id-management.halo.run/v1alpha1`
 
-### 5.2 文章绑定编号
+- `GET /health` 健康检查
+- `GET /lookup?link=/docs/manual/num` 按页面链接查询编号信息
 
-1. 在文章创建/编辑时选择未使用编号。
-2. 绑定成功后状态改为 `BOUND`。
-3. 同步回写文章 annotations。
+返回字段（节选）：
+- `fullCode`
+- `status` / `statusDisplayKey` / `statusDisplay`
+- `effectiveDate` / `supersededDate` / `voidDate`
+- `issuingAuthority`
+- `deptCode` / `docType`
+- `articleTitle` / `articleLink` / `articlePublishedDate`
 
-### 5.3 修订流程
+## 主题适配方法
 
-1. 基于主号创建修订（Rev 可手动指定）。
-2. 新修订记录入台账，未绑定前状态 `REGISTERED`，绑定后 `BOUND`。
+详细说明见：`THEME_PLUGIN_ADAPTER.md`
 
-## 6. 状态定义
+推荐两种接入方式：
 
-- `REGISTERED`：已注册，未绑定文章。
-- `BOUND`：已绑定文章，不可再分配。
-- `SUPERSEDED`：被新修订替代（可选策略）。
-- `VOID`：作废，不可使用。
+1. Post 页面（注解直读）
+- 在模板中读取 `post.metadata.annotations['article-id-management/fullCode']` 等字段。
 
-## 7. 数据模型（V1）
+2. Docs/非 Post 页面（公开接口）
+- 用当前路径调用：
+  `GET /apis/api.article-id-management.halo.run/v1alpha1/lookup?link=${window.location.pathname}`
+- 命中后渲染编号信息；未命中保持隐藏。
 
-### 7.1 规则配置（rule_config）
+## 权限模板
 
-- `prefix`（默认 `MS`）
-- `serial_width`（默认 `4`）
-- `reset_per_year`（默认 `true`）
-- `departments`（部门编码字典）
-- `doc_types`（文件类型编码字典）
-- `enabled`
+文件：`src/main/resources/extensions/article-id-role-templates.yaml`
 
-### 7.2 编号台账（article_id_ledger）
+已提供 4 套角色模板：
+- `article-id-management-role-view`
+- `article-id-management-role-create`
+- `article-id-management-role-modify`
+- `article-id-management-role-manage`
 
-- `id`（UUID）
-- `full_code`（唯一）
-- `prefix`
-- `dept_code`
-- `doc_type`
-- `serial`
-- `sub_serial`（可空）
-- `year`
-- `rev`（可空）
-- `status`
-- `article_name`（可空）
-- `article_title_snapshot`（可空）
-- `created_by/created_at`
-- `updated_by/updated_at`
-- `remark`（可空）
+对应 UI 权限键：
+- `plugin:article-id-management:view`
+- `plugin:article-id-management:create`
+- `plugin:article-id-management:modify`
+- `plugin:article-id-management:manage`
 
-### 7.3 审计日志（ledger_audit_log）
+## 本地开发
 
-- `ledger_id`
-- `action`
-- `operator`
-- `before_json`
-- `after_json`
-- `created_at`
-
-## 8. API 规划（V1）
-
-### Console API（后台）
-
-- `GET /apis/api.article-id-management.console/v1/rules`
-- `PUT /apis/api.article-id-management.console/v1/rules`
-- `POST /apis/api.article-id-management.console/v1/ledger/preview`
-- `POST /apis/api.article-id-management.console/v1/ledger/register`
-- `GET /apis/api.article-id-management.console/v1/ledger`
-- `GET /apis/api.article-id-management.console/v1/ledger/{id}`
-- `PATCH /apis/api.article-id-management.console/v1/ledger/{id}`
-- `POST /apis/api.article-id-management.console/v1/ledger/{id}/bind`
-- `POST /apis/api.article-id-management.console/v1/ledger/{id}/revise`
-- `POST /apis/api.article-id-management.console/v1/ledger/{id}/void`
-
-### Public API（可选）
-
-- `GET /apis/api.article-id-management.halo.run/v1/articles/{articleName}/id`
-
-## 9. 实施阶段
-
-1. Phase 1：后端模型、规则引擎、Console API
-2. Phase 2：后台 UI（规则配置、注册、台账）
-3. Phase 3：文章绑定入口 + annotations 回写
-4. Phase 4：权限、审计、并发一致性与测试
-5. Phase 5：联调验收与发布
-
-## 10. 验收标准
-
-1. 编号可注册、可筛选、可绑定、可修订、可作废。
-2. 并发注册不重复（`full_code` 唯一）。
-3. 已绑定编号在文章删除/回草稿后不回收。
-4. Rev 支持手动指定并通过校验。
-5. 四级权限行为与预期一致。
-
-## 11. 本地开发
-
+1. 开发运行（推荐）
 ```bash
-# 启动 Halo 开发容器并加载插件
 ./gradlew.bat haloServer
+```
 
-# 构建插件
+2. 构建插件
+```bash
 ./gradlew.bat build
+```
+
+3. 构建产物
+- `build/libs/plugin-article-id-management-<version>.jar`
+
+## 发布/联调建议
+
+1. 每次打包前递增版本号（例如 `+0.0.1`）。
+2. 上传新 JAR 到 Halo 后台插件页完成升级。
+3. 刷新控制台并验证：
+- 插件版本变化
+- 菜单与权限显示
+- `lookup` 接口可用
+- 主题展示生效

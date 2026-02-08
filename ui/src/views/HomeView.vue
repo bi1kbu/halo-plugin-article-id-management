@@ -881,7 +881,7 @@ onMounted(loadAll)
   <div class="page">
     <header class="page-header">
       <h1>文章编号管理</h1>
-      <p>{{ modeTitles[currentMode] }} · 子菜单按权限显示</p>
+      
     </header>
 
     <p v-if="message" class="message">{{ message }}</p>

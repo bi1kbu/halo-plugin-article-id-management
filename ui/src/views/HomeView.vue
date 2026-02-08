@@ -23,6 +23,8 @@ type LedgerItem = {
   deptCode: string
   docType: string
   status: string
+  statusDisplayKey?: string
+  statusDisplay?: string
   createdAt: string
   replacesCode?: string
   replacedByCode?: string
@@ -80,9 +82,9 @@ const modeTitles: Record<Mode, string> = {
 }
 const statusText: Record<string, string> = {
   REGISTERED: '已注册',
-  BOUND: '已绑定',
-  SUPERSEDED: '已替代',
-  VOID: '已作废',
+  BOUND: '现行有效',
+  SUPERSEDED: '废止',
+  VOID: '废止',
   DELETED: '已删除',
 }
 const actionText: Record<string, string> = {
@@ -200,7 +202,7 @@ const typeOptions = computed(() => rules.value.docTypes || [])
 const relationOptions = computed(() =>
   ledger.value.map((item) => ({
     code: item.fullCode,
-    label: `${item.fullCode}（${statusLabel(item.status)}）`,
+    label: `${item.fullCode}（${statusDisplayLabel(item)}）`,
     id: item.id,
   })),
 )
@@ -215,9 +217,9 @@ const typeFilterOptions = computed<FilterOption[]>(() =>
 )
 const statusFilterOptions: FilterOption[] = [
   { value: 'REGISTERED', label: '已注册' },
-  { value: 'BOUND', label: '已绑定' },
-  { value: 'SUPERSEDED', label: '已替代' },
-  { value: 'VOID', label: '已作废' },
+  { value: 'BOUND_PENDING', label: '即将生效' },
+  { value: 'BOUND_EFFECTIVE', label: '现行有效' },
+  { value: 'TERMINATED', label: '废止' },
   { value: 'DELETED', label: '已删除' },
 ]
 const actionFilterOptions = computed<FilterOption[]>(() =>
@@ -239,7 +241,7 @@ const filteredLedger = computed(() => {
     if (docTypes.length > 0 && !docTypes.includes(item.docType)) {
       return false
     }
-    if (statuses.length > 0 && !statuses.includes(item.status)) {
+    if (statuses.length > 0 && !statuses.includes(statusFilterKey(item))) {
       return false
     }
     if (keyword && !item.fullCode.toLowerCase().includes(keyword)) {
@@ -254,7 +256,7 @@ const filteredUpdateLedger = computed(() => {
     return ledger.value
   }
   return ledger.value.filter((item) => {
-    const text = [item.fullCode, item.deptCode, item.docType, statusLabel(item.status)].join(' ').toLowerCase()
+    const text = [item.fullCode, item.deptCode, item.docType, statusDisplayLabel(item)].join(' ').toLowerCase()
     return text.includes(keyword)
   })
 })
@@ -366,6 +368,8 @@ function normalizeLedgerItem(item: any): LedgerItem | null {
     deptCode: String(item.deptCode || ''),
     docType: String(item.docType || ''),
     status: String(item.status || 'REGISTERED'),
+    statusDisplayKey: item.statusDisplayKey ? String(item.statusDisplayKey) : '',
+    statusDisplay: item.statusDisplay ? String(item.statusDisplay) : '',
     createdAt: String(item.createdAt || ''),
     replacesCode: item.replacesCode ? String(item.replacesCode) : '',
     replacedByCode: item.replacedByCode ? String(item.replacedByCode) : '',
@@ -659,13 +663,15 @@ const updateLedger = async () => {
         autoRefreshBinding = true
       }
     }
-    await axios.patch(`${baseUrl}/ledger/${updateForm.value.id}`, {
+    const resp = await axios.patch(`${baseUrl}/ledger/${updateForm.value.id}`, {
       status: updateForm.value.status,
       replacesCode: joinCodes(updateForm.value.replacesCode),
       replacedByCode: joinCodes(updateForm.value.replacedByCode),
       dependencyCodes: joinCodes(updateForm.value.dependencyCodes),
       remark: updateForm.value.remark,
       articleName: updateForm.value.articleName || null,
+      articleTitle: updateForm.value.articleTitle || null,
+      articleLink: updateForm.value.articleLink || null,
       articlePublishedDate: updateForm.value.articlePublishedDate || null,
       autoRefreshBinding,
       effectiveDate: updateForm.value.effectiveDate || null,
@@ -674,6 +680,12 @@ const updateLedger = async () => {
     })
     message.value = '编号更新成功'
     await loadAll()
+    const saved = normalizeLedgerItem(resp.data)
+    const savedId = saved?.id || updateForm.value.id
+    const latest = ledger.value.find((item) => item.id === savedId)
+    if (latest) {
+      pickUpdateTarget(latest)
+    }
   } catch (err: any) {
     message.value = err?.response?.data?.message || '编号更新失败'
   } finally {
@@ -699,6 +711,19 @@ const markDeleted = async (item: LedgerItem) => {
 }
 
 const statusLabel = (status: string) => statusText[status] || status
+const statusFilterKey = (item: LedgerItem) => {
+  if (item.statusDisplayKey) {
+    return item.statusDisplayKey
+  }
+  if (item.status === 'SUPERSEDED' || item.status === 'VOID') {
+    return 'TERMINATED'
+  }
+  if (item.status === 'BOUND') {
+    return 'BOUND_EFFECTIVE'
+  }
+  return item.status
+}
+const statusDisplayLabel = (item: LedgerItem) => item.statusDisplay || statusLabel(item.status)
 const actionLabel = (action: string) => actionText[action] || action
 const formatDateTime = (value?: string) => {
   if (!value) {
@@ -1063,7 +1088,7 @@ onMounted(loadAll)
               <td>{{ item.fullCode }}</td>
               <td>{{ item.deptCode }}</td>
               <td>{{ item.docType }}</td>
-              <td>{{ statusLabel(item.status) }}</td>
+              <td>{{ statusDisplayLabel(item) }}</td>
               <td>{{ formatDateTime(item.createdAt) }}</td>
             </tr>
             <tr v-if="createdSessionLedger.length === 0">
@@ -1093,9 +1118,9 @@ onMounted(loadAll)
             状态
             <select v-model="updateForm.status">
               <option value="REGISTERED">已注册</option>
-              <option value="BOUND">已绑定</option>
-              <option value="SUPERSEDED">已替代</option>
-              <option value="VOID">已作废</option>
+              <option value="BOUND">已绑定（按生效日期动态展示）</option>
+              <option value="SUPERSEDED">废止（替代）</option>
+              <option value="VOID">废止（作废）</option>
               <option value="DELETED">已删除</option>
             </select>
           </label>
@@ -1232,7 +1257,7 @@ onMounted(loadAll)
               <td>{{ item.fullCode }}</td>
               <td>{{ item.deptCode }}</td>
               <td>{{ item.docType }}</td>
-              <td>{{ statusLabel(item.status) }}</td>
+              <td>{{ statusDisplayLabel(item) }}</td>
               <td>{{ formatDateTime(item.createdAt) }}</td>
               <td><button type="button" class="small">编辑</button></td>
             </tr>
@@ -1339,7 +1364,7 @@ onMounted(loadAll)
                 <td>{{ item.fullCode }}</td>
                 <td>{{ item.deptCode }}</td>
                 <td>{{ item.docType }}</td>
-                <td>{{ statusLabel(item.status) }}</td>
+                <td>{{ statusDisplayLabel(item) }}</td>
                 <td class="icon-cell"><span class="relation-dot" :class="{ active: hasRelation(item.replacesCode) }">{{ hasRelation(item.replacesCode) ? '●' : '○' }}</span></td>
                 <td class="icon-cell"><span class="relation-dot" :class="{ active: hasRelation(item.replacedByCode) }">{{ hasRelation(item.replacedByCode) ? '●' : '○' }}</span></td>
                 <td class="icon-cell"><span class="relation-dot" :class="{ active: hasRelation(item.dependencyCodes) }">{{ hasRelation(item.dependencyCodes) ? '●' : '○' }}</span></td>

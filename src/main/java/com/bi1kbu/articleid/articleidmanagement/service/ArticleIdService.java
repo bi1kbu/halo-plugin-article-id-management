@@ -61,6 +61,11 @@ public class ArticleIdService {
             .replacedByCode(request.getReplacedByCode())
             .dependencyCodes(request.getDependencyCodes())
             .remark(request.getRemark())
+            .articleName(request.getArticleName())
+            .articleTitleSnapshot(request.getArticleTitle())
+            .articleTitle(request.getArticleTitle())
+            .articleLink(request.getArticleLink())
+            .articlePublishedDate(request.getArticlePublishedDate())
             .createdAt(OffsetDateTime.now())
             .updatedAt(OffsetDateTime.now())
             .build();
@@ -97,6 +102,11 @@ public class ArticleIdService {
             .createdAt(now)
             .updatedAt(now)
             .remark(request.getRemark())
+            .articleName(request.getArticleName())
+            .articleTitleSnapshot(request.getArticleTitle())
+            .articleTitle(request.getArticleTitle())
+            .articleLink(request.getArticleLink())
+            .articlePublishedDate(request.getArticlePublishedDate())
             .build();
         state.getLedger().add(entry);
         appendLog(state, "LEDGER_REGISTERED", operator, entry.getId(), entry.getFullCode(), "注册新编号", List.of());
@@ -144,6 +154,48 @@ public class ArticleIdService {
         if (request.getRemark() != null) {
             appendFieldChange(changes, "备注", target.getRemark(), request.getRemark());
             target.setRemark(request.getRemark());
+        }
+        if (request.getArticleTitle() != null) {
+            appendFieldChange(changes, "绑定文章标题", target.getArticleTitle(), request.getArticleTitle());
+            target.setArticleTitle(request.getArticleTitle());
+            target.setArticleTitleSnapshot(request.getArticleTitle());
+        }
+        if (request.getArticleName() != null) {
+            appendFieldChange(changes, "绑定文章ID", target.getArticleName(), request.getArticleName());
+            target.setArticleName(request.getArticleName());
+        }
+        if (request.getArticleLink() != null) {
+            appendFieldChange(changes, "绑定文章链接", target.getArticleLink(), request.getArticleLink());
+            target.setArticleLink(request.getArticleLink());
+        }
+        if (request.getArticlePublishedDate() != null) {
+            appendFieldChange(changes, "绑定文章发布日期", target.getArticlePublishedDate(),
+                request.getArticlePublishedDate());
+            target.setArticlePublishedDate(request.getArticlePublishedDate());
+        }
+        if (request.getEffectiveDate() != null) {
+            appendFieldChange(changes, "生效日期", target.getEffectiveDate(), request.getEffectiveDate());
+            target.setEffectiveDate(request.getEffectiveDate());
+        }
+        if (request.getSupersededDate() != null) {
+            appendFieldChange(changes, "替代日期", target.getSupersededDate(), request.getSupersededDate());
+            target.setSupersededDate(request.getSupersededDate());
+        }
+        if (request.getVoidDate() != null) {
+            appendFieldChange(changes, "作废日期", target.getVoidDate(), request.getVoidDate());
+            target.setVoidDate(request.getVoidDate());
+        }
+
+        if (request.getStatus() == LedgerStatus.SUPERSEDED
+            && (target.getSupersededDate() == null || target.getSupersededDate().isBlank())) {
+            String today = OffsetDateTime.now().toLocalDate().toString();
+            appendFieldChange(changes, "替代日期", target.getSupersededDate(), today);
+            target.setSupersededDate(today);
+        }
+        if (request.getStatus() == LedgerStatus.VOID && (target.getVoidDate() == null || target.getVoidDate().isBlank())) {
+            String today = OffsetDateTime.now().toLocalDate().toString();
+            appendFieldChange(changes, "作废日期", target.getVoidDate(), today);
+            target.setVoidDate(today);
         }
         target.setUpdatedBy(operator);
         target.setUpdatedAt(OffsetDateTime.now());

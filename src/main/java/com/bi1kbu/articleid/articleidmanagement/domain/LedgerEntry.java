@@ -31,4 +31,10 @@ public class LedgerEntry {
     private String replacedByCode;
     private String dependencyCodes;
     private String remark;
+    private String articleTitle;
+    private String articleLink;
+    private String articlePublishedDate;
+    private String effectiveDate;
+    private String supersededDate;
+    private String voidDate;
 }

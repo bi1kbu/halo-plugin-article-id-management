@@ -28,6 +28,13 @@ type LedgerItem = {
   replacedByCode?: string
   dependencyCodes?: string
   remark?: string
+  articleName?: string
+  articleTitle?: string
+  articleLink?: string
+  articlePublishedDate?: string
+  effectiveDate?: string
+  supersededDate?: string
+  voidDate?: string
 }
 
 type OperationLog = {
@@ -43,6 +50,13 @@ type OperationLog = {
     toValue?: string
   }>
   createdAt: string
+}
+
+type PostOption = {
+  name: string
+  title: string
+  permalink: string
+  publishDate: string
 }
 
 type Mode = 'query' | 'create' | 'update' | 'manage' | 'logs'
@@ -118,6 +132,10 @@ const registerForm = ref({
   replacedByCode: [] as string[],
   dependencyCodes: [] as string[],
   remark: '',
+  articleName: '',
+  articleTitle: '',
+  articleLink: '',
+  articlePublishedDate: '',
 })
 const registerPick = ref({
   replacesCode: '',
@@ -132,16 +150,28 @@ const updateForm = ref({
   replacedByCode: [] as string[],
   dependencyCodes: [] as string[],
   remark: '',
+  articleName: '',
+  articleTitle: '',
+  articleLink: '',
+  articlePublishedDate: '',
+  effectiveDate: '',
+  supersededDate: '',
+  voidDate: '',
 })
 const updatePick = ref({
   replacesCode: '',
   replacedByCode: '',
   dependencyCodes: '',
 })
+const registerPostKeyword = ref('')
+const registerPickPostName = ref('')
+const updatePostKeyword = ref('')
+const updatePickPostName = ref('')
 
 const previewCode = ref('')
 const ledger = ref<LedgerItem[]>([])
 const logs = ref<OperationLog[]>([])
+const postOptions = ref<PostOption[]>([])
 const createdSessionLedger = ref<LedgerItem[]>([])
 const updateKeyword = ref('')
 const ledgerFilter = ref({
@@ -229,6 +259,20 @@ const filteredUpdateLedger = computed(() => {
   })
 })
 const selectedUpdateItem = computed(() => ledger.value.find((item) => item.id === updateForm.value.id) || null)
+const filteredRegisterPostOptions = computed(() => {
+  const keyword = registerPostKeyword.value.trim().toLowerCase()
+  if (!keyword) {
+    return postOptions.value
+  }
+  return postOptions.value.filter((item) => `${item.title} ${item.permalink}`.toLowerCase().includes(keyword))
+})
+const filteredUpdatePostOptions = computed(() => {
+  const keyword = updatePostKeyword.value.trim().toLowerCase()
+  if (!keyword) {
+    return postOptions.value
+  }
+  return postOptions.value.filter((item) => `${item.title} ${item.permalink}`.toLowerCase().includes(keyword))
+})
 
 const canView = computed(() => hasPermission(['article-id-management:view', 'article-id-management:create', 'article-id-management:modify', 'article-id-management:manage']))
 const canCreate = computed(() => hasPermission(['article-id-management:create', 'article-id-management:manage']))
@@ -310,15 +354,36 @@ function normalizeLedgerItem(item: any): LedgerItem | null {
     replacedByCode: item.replacedByCode ? String(item.replacedByCode) : '',
     dependencyCodes: item.dependencyCodes ? String(item.dependencyCodes) : '',
     remark: item.remark ? String(item.remark) : '',
+    articleName: item.articleName ? String(item.articleName) : '',
+    articleTitle: item.articleTitle ? String(item.articleTitle) : '',
+    articleLink: item.articleLink ? String(item.articleLink) : '',
+    articlePublishedDate: item.articlePublishedDate ? String(item.articlePublishedDate) : '',
+    effectiveDate: item.effectiveDate ? String(item.effectiveDate) : '',
+    supersededDate: item.supersededDate ? String(item.supersededDate) : '',
+    voidDate: item.voidDate ? String(item.voidDate) : '',
+  }
+}
+
+function normalizePostOption(item: any): PostOption | null {
+  const name = item?.metadata?.name
+  if (!name) {
+    return null
+  }
+  return {
+    name: String(name),
+    title: String(item?.spec?.title || item?.metadata?.name || ''),
+    permalink: String(item?.status?.permalink || ''),
+    publishDate: String(item?.spec?.publishTime || ''),
   }
 }
 
 const loadAll = async () => {
   loading.value = true
   try {
-    const [ruleResp, ledgerResp] = await Promise.all([
+    const [ruleResp, ledgerResp, postResp] = await Promise.all([
       axios.get(`${baseUrl}/rules`),
       axios.get(`${baseUrl}/ledger`),
+      axios.get('/apis/api.content.halo.run/v1alpha1/posts?page=1&size=200'),
     ])
     rules.value = {
       codePattern: '{前缀}-{部门编码}/{文件类型}-{流水号}{子文件片段}/{年份}{修订片段}',
@@ -328,6 +393,9 @@ const loadAll = async () => {
     }
     ledger.value = Array.isArray(ledgerResp.data)
       ? ledgerResp.data.map((item: any) => normalizeLedgerItem(item)).filter(Boolean) as LedgerItem[]
+      : []
+    postOptions.value = Array.isArray(postResp?.data?.items)
+      ? postResp.data.items.map((item: any) => normalizePostOption(item)).filter(Boolean) as PostOption[]
       : []
     try {
       const logResp = await axios.get(`${baseUrl}/logs`)
@@ -391,7 +459,43 @@ const buildPayload = () => ({
   replacedByCode: joinCodes(registerForm.value.replacedByCode),
   dependencyCodes: joinCodes(registerForm.value.dependencyCodes),
   remark: registerForm.value.remark || null,
+  articleName: registerForm.value.articleName || null,
+  articleTitle: registerForm.value.articleTitle || null,
+  articleLink: registerForm.value.articleLink || null,
+  articlePublishedDate: registerForm.value.articlePublishedDate || null,
 })
+
+const applyPostToRegister = (selectedName?: string) => {
+  const pickName = selectedName || registerPickPostName.value
+  if (!pickName) return
+  const target = postOptions.value.find((item) => item.name === pickName)
+  if (!target) return
+  registerPickPostName.value = target.name
+  registerForm.value.articleName = target.name
+  registerForm.value.articleTitle = target.title
+  registerForm.value.articleLink = target.permalink || ''
+  registerForm.value.articlePublishedDate = target.publishDate ? target.publishDate.slice(0, 10) : ''
+}
+
+const applyPostToUpdate = (selectedName?: string) => {
+  const pickName = selectedName || updatePickPostName.value
+  if (!pickName) return
+  const target = postOptions.value.find((item) => item.name === pickName)
+  if (!target) return
+  updatePickPostName.value = target.name
+  updateForm.value.articleName = target.name
+  updateForm.value.articleTitle = target.title
+  updateForm.value.articleLink = target.permalink || ''
+  updateForm.value.articlePublishedDate = target.publishDate ? target.publishDate.slice(0, 10) : ''
+}
+const onRegisterPostSelectChange = (event: Event) => {
+  const value = (event.target as HTMLSelectElement).value
+  applyPostToRegister(value)
+}
+const onUpdatePostSelectChange = (event: Event) => {
+  const value = (event.target as HTMLSelectElement).value
+  applyPostToUpdate(value)
+}
 
 const preview = async () => {
   previewing.value = true
@@ -428,6 +532,11 @@ const registerCode = async () => {
     registerPick.value.replacedByCode = ''
     registerPick.value.dependencyCodes = ''
     registerForm.value.remark = ''
+    registerForm.value.articleName = ''
+    registerForm.value.articleTitle = ''
+    registerForm.value.articleLink = ''
+    registerForm.value.articlePublishedDate = ''
+    registerPickPostName.value = ''
     await loadAll()
   } catch (err: any) {
     message.value = err?.response?.data?.message || '编号注册失败'
@@ -443,6 +552,14 @@ const pickUpdateTarget = (item: LedgerItem) => {
   updateForm.value.replacedByCode = splitCodes(item.replacedByCode)
   updateForm.value.dependencyCodes = splitCodes(item.dependencyCodes)
   updateForm.value.remark = item.remark || ''
+  updateForm.value.articleTitle = item.articleTitle || ''
+  updateForm.value.articleName = item.articleName || ''
+  updateForm.value.articleLink = item.articleLink || ''
+  updateForm.value.articlePublishedDate = item.articlePublishedDate || ''
+  updateForm.value.effectiveDate = item.effectiveDate || ''
+  updateForm.value.supersededDate = item.supersededDate || ''
+  updateForm.value.voidDate = item.voidDate || ''
+  updatePickPostName.value = item.articleName || ''
 }
 
 const updateLedger = async () => {
@@ -459,6 +576,13 @@ const updateLedger = async () => {
       replacedByCode: joinCodes(updateForm.value.replacedByCode),
       dependencyCodes: joinCodes(updateForm.value.dependencyCodes),
       remark: updateForm.value.remark,
+      articleName: updateForm.value.articleName || null,
+      articleTitle: updateForm.value.articleTitle,
+      articleLink: updateForm.value.articleLink,
+      articlePublishedDate: updateForm.value.articlePublishedDate || null,
+      effectiveDate: updateForm.value.effectiveDate || null,
+      supersededDate: updateForm.value.supersededDate || null,
+      voidDate: updateForm.value.voidDate || null,
     })
     message.value = '编号更新成功'
     await loadAll()
@@ -752,6 +876,19 @@ onMounted(loadAll)
           Rev（可空）
           <input v-model="registerForm.rev" type="number" min="1" />
         </label>
+        <label class="field-full">
+          绑定文章（选择器）
+          <div class="post-picker">
+            <input v-model="registerPostKeyword" type="text" placeholder="搜索文章标题或链接" />
+            <select v-model="registerPickPostName" @change="onRegisterPostSelectChange">
+              <option value="">请选择文章</option>
+              <option v-for="item in filteredRegisterPostOptions" :key="`register-post-${item.name}`" :value="item.name">
+                {{ item.title }} {{ item.permalink ? `(${item.permalink})` : '' }}
+              </option>
+            </select>
+            <button type="button" class="small" @click="() => applyPostToRegister()">选择</button>
+          </div>
+        </label>
         <label>
           替代（来源编号）
           <div class="relation-picker">
@@ -878,6 +1015,45 @@ onMounted(loadAll)
           备注
           <input v-model="updateForm.remark" type="text" />
         </label>
+        <div class="grid compact">
+          <label>
+            绑定文章（选择器）
+            <div class="post-picker">
+              <input v-model="updatePostKeyword" type="text" placeholder="搜索文章标题或链接" />
+              <select v-model="updatePickPostName" @change="onUpdatePostSelectChange">
+                <option value="">请选择文章</option>
+                <option v-for="item in filteredUpdatePostOptions" :key="`update-post-${item.name}`" :value="item.name">
+                  {{ item.title }} {{ item.permalink ? `(${item.permalink})` : '' }}
+                </option>
+              </select>
+              <button type="button" class="small" @click="() => applyPostToUpdate()">选择</button>
+            </div>
+          </label>
+          <label>
+            绑定文章标题
+            <input v-model="updateForm.articleTitle" type="text" placeholder="文章标题" />
+          </label>
+          <label>
+            绑定文章链接
+            <input v-model="updateForm.articleLink" type="text" placeholder="https://..." />
+          </label>
+          <label>
+            绑定文章发布日期
+            <input v-model="updateForm.articlePublishedDate" type="date" />
+          </label>
+          <label>
+            生效日期
+            <input v-model="updateForm.effectiveDate" type="date" />
+          </label>
+          <label>
+            替代日期
+            <input v-model="updateForm.supersededDate" type="date" />
+          </label>
+          <label>
+            作废日期
+            <input v-model="updateForm.voidDate" type="date" />
+          </label>
+        </div>
         <label>
           替代（来源编号）
           <div class="relation-picker">
@@ -1087,6 +1263,16 @@ onMounted(loadAll)
                     <p><strong>替代：</strong>{{ relationText(item.replacesCode) }}</p>
                     <p><strong>被替代：</strong>{{ relationText(item.replacedByCode) }}</p>
                     <p><strong>依赖：</strong>{{ relationText(item.dependencyCodes) }}</p>
+                    <p><strong>绑定文章标题：</strong>{{ item.articleTitle || '-' }}</p>
+                    <p>
+                      <strong>绑定文章链接：</strong>
+                      <a v-if="item.articleLink" :href="item.articleLink" target="_blank" rel="noopener noreferrer">{{ item.articleLink }}</a>
+                      <span v-else>-</span>
+                    </p>
+                    <p><strong>绑定文章发布日期：</strong>{{ item.articlePublishedDate || '-' }}</p>
+                    <p><strong>生效日期：</strong>{{ item.effectiveDate || '-' }}</p>
+                    <p><strong>替代日期：</strong>{{ item.supersededDate || '-' }}</p>
+                    <p><strong>作废日期：</strong>{{ item.voidDate || '-' }}</p>
                     <p><strong>备注：</strong>{{ item.remark || '-' }}</p>
                   </div>
                 </td>
@@ -1343,6 +1529,8 @@ label {
   background: #f8fbff !important;
   color: #0f172a !important;
   box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
   box-shadow: none !important;
 }
 
@@ -1395,6 +1583,36 @@ label {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
+}
+
+.post-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.grid > label.field-full {
+  grid-column: 1 / -1;
+}
+
+.post-picker input {
+  grid-column: 1 / -1;
+}
+
+.post-picker select {
+  min-width: 0;
+}
+
+.post-picker button.small {
+  min-width: 72px;
+  height: 44px;
+  line-height: 1;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
 }
 
 .chips {
@@ -1835,6 +2053,14 @@ td {
 
   .option-row {
     grid-template-columns: 1fr;
+  }
+
+  .post-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .grid > label.field-full {
+    grid-column: auto;
   }
 }
 </style>

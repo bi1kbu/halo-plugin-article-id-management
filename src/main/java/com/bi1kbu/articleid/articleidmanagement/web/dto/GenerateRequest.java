@@ -24,4 +24,8 @@ public class GenerateRequest {
     private String replacedByCode;
     private String dependencyCodes;
     private String remark;
+    private String articleName;
+    private String articleTitle;
+    private String articleLink;
+    private String articlePublishedDate;
 }

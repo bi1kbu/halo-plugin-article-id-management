@@ -1119,12 +1119,10 @@ onMounted(loadAll)
               <button type="button" class="small" @click="() => void applyPostToUpdate()">选择</button>
             </div>
           </label>
-          <label>
+          <label class="binding-info">
             绑定文章标题
             <span class="value-label">{{ updateForm.articleTitle || '-' }}</span>
-          </label>
-          <label>
-            绑定文章链接
+            <span class="binding-sub-label">绑定文章链接</span>
             <span class="value-label mono">{{ updateForm.articleLink || '-' }}</span>
           </label>
           <label>
@@ -1659,6 +1657,17 @@ label {
   font-size: 14px;
   color: #334155;
   word-break: break-all;
+}
+
+.binding-info {
+  gap: 6px;
+}
+
+.binding-sub-label {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
 }
 
 .mono {

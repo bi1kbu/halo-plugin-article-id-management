@@ -1,27 +1,32 @@
 # article-id-management
 
 Halo 2 插件：文件编号台账管理、编号规则配置、绑定关系维护、操作审计与主题联动展示。
+<img width="1076" height="1689" alt="image" src="https://github.com/user-attachments/assets/90f6e063-742f-429a-af75-f7ecd7fec832" />
 
 ## 功能概览
 
 1. 编号规则管理
 - 支持前缀、流水号位数、是否按年份重置、编号显示规则（占位符）配置。
 - 支持部门编码与文件类型字典配置（`code + label`）。
+<img width="1074" height="1341" alt="image" src="https://github.com/user-attachments/assets/723c4758-9451-41c2-b496-bcd0723a0721" />
 
 2. 编号注册与台账
 - 先注册编号，再绑定内容。
 - 支持 `serial/sub/rev` 组合生成编号，`Rev` 可手动指定。
 - 台账支持筛选、分页、状态管理、依赖/替代关系维护。
+<img width="1065" height="1260" alt="image" src="https://github.com/user-attachments/assets/51cff1d9-b39b-4d25-adac-444035b854f1" />
 
 3. 绑定信息管理
 - 支持绑定对象名称、标题、链接、发布日期快照。
 - 支持保存时自动刷新绑定信息快照（标题/链接/发布日期）。
 - 已绑定对象不可重复被其他编号占用。
+<img width="1076" height="1689" alt="image" src="https://github.com/user-attachments/assets/b3a858b4-69e1-4aee-ac22-0995a9cec0b7" />
 
 4. 状态与审计
 - 状态：`REGISTERED`、`BOUND`、`SUPERSEDED`、`VOID`、`DELETED`。
 - 显示态支持动态拆分：`BOUND_PENDING`（即将生效）、`BOUND_EFFECTIVE`（现行有效）。
 - 全量操作日志（操作人、时间、摘要、字段变更）。
+<img width="1062" height="1611" alt="image" src="https://github.com/user-attachments/assets/4412485f-0fde-49a3-ae35-41971062886c" />
 
 5. 权限模型
 - 四级权限模板：查看、创建、修改、完全管理。

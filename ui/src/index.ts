@@ -23,7 +23,7 @@ export default definePlugin({
             icon: markRaw(IconPlug),
             priority: 10,
           },
-          permissions: ['article-id-management:view'],
+          permissions: ['plugin:article-id-management:view'],
         },
         children: [
           {
@@ -34,7 +34,7 @@ export default definePlugin({
             meta: {
               title: '编号查询',
               searchable: true,
-              permissions: ['article-id-management:view'],
+              permissions: ['plugin:article-id-management:view'],
             },
           },
           {
@@ -49,7 +49,7 @@ export default definePlugin({
                 name: '编号创建',
                 priority: 20,
               },
-              permissions: ['article-id-management:create'],
+              permissions: ['plugin:article-id-management:create'],
             },
           },
           {
@@ -64,7 +64,7 @@ export default definePlugin({
                 name: '编号修改',
                 priority: 30,
               },
-              permissions: ['article-id-management:modify'],
+              permissions: ['plugin:article-id-management:modify'],
             },
           },
           {
@@ -79,7 +79,7 @@ export default definePlugin({
                 name: '规则管理',
                 priority: 40,
               },
-              permissions: ['article-id-management:manage'],
+              permissions: ['plugin:article-id-management:manage'],
             },
           },
           {
@@ -94,7 +94,7 @@ export default definePlugin({
                 name: '操作日志',
                 priority: 50,
               },
-              permissions: ['article-id-management:view'],
+              permissions: ['plugin:article-id-management:view'],
             },
           },
         ],

@@ -1,0 +1,83 @@
+apiVersion: v1alpha1
+kind: Role
+metadata:
+  name: article-id-management-role-view
+  labels:
+    halo.run/role-template: "true"
+  annotations:
+    rbac.authorization.halo.run/module: "文件编号管理"
+    rbac.authorization.halo.run/display-name: "文件编号查看"
+    rbac.authorization.halo.run/ui-permissions: |
+      ["plugin:article-id-management:view"]
+rules:
+  - apiGroups: ["api.article-id-management.console"]
+    resources:
+      - "article-id-management/rules"
+      - "article-id-management/ledger"
+      - "article-id-management/logs"
+    verbs: ["get", "list"]
+---
+apiVersion: v1alpha1
+kind: Role
+metadata:
+  name: article-id-management-role-create
+  labels:
+    halo.run/role-template: "true"
+  annotations:
+    rbac.authorization.halo.run/dependencies: |
+      ["article-id-management-role-view"]
+    rbac.authorization.halo.run/module: "文件编号管理"
+    rbac.authorization.halo.run/display-name: "文件编号创建"
+    rbac.authorization.halo.run/ui-permissions: |
+      ["plugin:article-id-management:create"]
+rules:
+  - apiGroups: ["api.article-id-management.console"]
+    resources:
+      - "article-id-management/ledger/register"
+      - "article-id-management/ledger/preview"
+      - "article-id-management/ledger"
+    verbs: ["create", "patch", "get", "list"]
+---
+apiVersion: v1alpha1
+kind: Role
+metadata:
+  name: article-id-management-role-modify
+  labels:
+    halo.run/role-template: "true"
+  annotations:
+    rbac.authorization.halo.run/dependencies: |
+      ["article-id-management-role-view"]
+    rbac.authorization.halo.run/module: "文件编号管理"
+    rbac.authorization.halo.run/display-name: "文件编号修改"
+    rbac.authorization.halo.run/ui-permissions: |
+      ["plugin:article-id-management:modify"]
+rules:
+  - apiGroups: ["api.article-id-management.console"]
+    resources:
+      - "article-id-management/ledger"
+      - "article-id-management/ledger/preview"
+    verbs: ["get", "list", "patch", "update", "create"]
+---
+apiVersion: v1alpha1
+kind: Role
+metadata:
+  name: article-id-management-role-manage
+  labels:
+    halo.run/role-template: "true"
+  annotations:
+    rbac.authorization.halo.run/dependencies: |
+      ["article-id-management-role-view","article-id-management-role-create","article-id-management-role-modify"]
+    rbac.authorization.halo.run/module: "文件编号管理"
+    rbac.authorization.halo.run/display-name: "文件编号完全管理"
+    rbac.authorization.halo.run/ui-permissions: |
+      ["plugin:article-id-management:manage"]
+rules:
+  - apiGroups: ["api.article-id-management.console"]
+    resources:
+      - "article-id-management/rules"
+      - "article-id-management/ledger"
+      - "article-id-management/ledger/register"
+      - "article-id-management/ledger/preview"
+      - "article-id-management/ledger/mark-delete"
+      - "article-id-management/logs"
+    verbs: ["*"]

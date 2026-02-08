@@ -293,10 +293,10 @@ const availableUpdatePostOptions = computed(() =>
   postOptions.value.filter((item) => item.name === updateForm.value.articleName || !occupiedBindingNames.value.has(item.name)),
 )
 
-const canView = computed(() => hasPermission(['article-id-management:view', 'article-id-management:create', 'article-id-management:modify', 'article-id-management:manage']))
-const canCreate = computed(() => hasPermission(['article-id-management:create', 'article-id-management:manage']))
-const canModify = computed(() => hasPermission(['article-id-management:modify', 'article-id-management:manage']))
-const canManage = computed(() => hasPermission(['article-id-management:manage']))
+const canView = computed(() => hasPermission(['plugin:article-id-management:view', 'plugin:article-id-management:create', 'plugin:article-id-management:modify', 'plugin:article-id-management:manage']))
+const canCreate = computed(() => hasPermission(['plugin:article-id-management:create', 'plugin:article-id-management:manage']))
+const canModify = computed(() => hasPermission(['plugin:article-id-management:modify', 'plugin:article-id-management:manage']))
+const canManage = computed(() => hasPermission(['plugin:article-id-management:manage']))
 const logActions = computed(() => Array.from(new Set(logs.value.map((item) => item.action).filter(Boolean))))
 const logOperators = computed(() => Array.from(new Set(logs.value.map((item) => item.operator).filter(Boolean))))
 const filteredLogs = computed(() => {

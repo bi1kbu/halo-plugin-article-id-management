@@ -7,6 +7,7 @@ import com.bi1kbu.articleid.articleidmanagement.domain.OperationLogChange;
 import com.bi1kbu.articleid.articleidmanagement.domain.RuleConfig;
 import com.bi1kbu.articleid.articleidmanagement.domain.RuleOption;
 import com.bi1kbu.articleid.articleidmanagement.search.ArticleIdSearchDocumentMapper;
+import com.bi1kbu.articleid.articleidmanagement.web.dto.PublicLookupResponse;
 import com.bi1kbu.articleid.articleidmanagement.web.dto.GenerateRequest;
 import com.bi1kbu.articleid.articleidmanagement.web.dto.UpdateLedgerRequest;
 import java.time.OffsetDateTime;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -159,6 +161,35 @@ public class ArticleIdService {
         return storage.read().getLogs().stream()
             .sorted(Comparator.comparing(OperationLog::getCreatedAt).reversed())
             .toList();
+    }
+
+    public Optional<PublicLookupResponse> lookupByLink(String link) {
+        var normalized = normalizeLink(link);
+        if (normalized == null) {
+            return Optional.empty();
+        }
+        var state = storage.read();
+        var config = state.getRuleConfig();
+        return state.getLedger().stream()
+            .filter(item -> item != null && item.getStatus() != LedgerStatus.DELETED)
+            .filter(item -> Objects.equals(normalizeLink(item.getArticleLink()), normalized))
+            .max(Comparator.comparing(item -> item.getUpdatedAt() != null ? item.getUpdatedAt() : item.getCreatedAt()))
+            .map(item -> PublicLookupResponse.builder()
+                .ledgerId(item.getId())
+                .fullCode(item.getFullCode())
+                .status(item.getStatus() != null ? item.getStatus().name() : "")
+                .statusDisplayKey(item.getStatusDisplayKey())
+                .statusDisplay(item.getStatusDisplay())
+                .effectiveDate(item.getEffectiveDate())
+                .supersededDate(item.getSupersededDate())
+                .voidDate(item.getVoidDate())
+                .issuingAuthority(resolveIssuingAuthority(item.getDeptCode(), config))
+                .deptCode(item.getDeptCode())
+                .docType(item.getDocType())
+                .articleTitle(item.getArticleTitle())
+                .articleLink(item.getArticleLink())
+                .articlePublishedDate(item.getArticlePublishedDate())
+                .build());
     }
 
     public LedgerEntry updateLedger(String id, UpdateLedgerRequest request, String operator) {
@@ -489,6 +520,41 @@ public class ArticleIdService {
         }
         var trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeLink(String link) {
+        var value = trimToNull(link);
+        if (value == null) {
+            return null;
+        }
+        value = value.replace("\\", "/");
+        int hashIndex = value.indexOf('#');
+        if (hashIndex >= 0) {
+            value = value.substring(0, hashIndex);
+        }
+        int queryIndex = value.indexOf('?');
+        if (queryIndex >= 0) {
+            value = value.substring(0, queryIndex);
+        }
+        if (value.startsWith("http://") || value.startsWith("https://")) {
+            try {
+                var uri = java.net.URI.create(value);
+                value = uri.getPath();
+            } catch (Exception ignored) {
+                // keep original value when uri parse fails
+            }
+        }
+        value = value.trim();
+        if (value.isEmpty()) {
+            return null;
+        }
+        if (!value.startsWith("/")) {
+            value = "/" + value;
+        }
+        if (value.length() > 1 && value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        return value;
     }
 
     private int resolveSerial(GenerateRequest request, RuleConfig config, List<LedgerEntry> ledger) {

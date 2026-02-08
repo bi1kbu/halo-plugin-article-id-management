@@ -123,3 +123,56 @@
 1. 提供“台账 -> 文章注解”一次性补偿任务，用于历史数据回填。
 2. 在插件中提供只读公开 API，供主题做复杂展示（如替代链、依赖链）。
 3. 增加自动化测试：注册、修改、解绑、状态变更对应注解同步断言。
+
+## 10. Docs / 非 Post 页面接入（方案 1）
+当页面不是 Halo `Post`（如 Docsme 页面）时，`post.metadata.annotations` 可能为空。此时建议主题按页面 URL 查询插件公开接口。
+
+### 10.1 插件公开接口
+- 路径：`GET /apis/api.article-id-management.halo.run/v1alpha1/lookup?link={页面路径}`
+- 示例：`/apis/api.article-id-management.halo.run/v1alpha1/lookup?link=/docs/manual/num`
+- 成功返回字段（节选）：
+  - `fullCode`
+  - `statusDisplay`（中文状态）
+  - `effectiveDate` / `voidDate` / `supersededDate`
+  - `issuingAuthority`
+  - `articleTitle` / `articleLink` / `articlePublishedDate`
+- 未命中返回 `404`
+
+### 10.2 主题模板接入示例（Thymeleaf）
+在 docs 详情模板加一个容器：
+
+```html
+<div id="article-id-block" style="display:none">
+  <div><strong>文件编号：</strong><span data-k="fullCode"></span></div>
+  <div><strong>状态：</strong><span data-k="statusDisplay"></span></div>
+  <div><strong>发文机构：</strong><span data-k="issuingAuthority"></span></div>
+  <div><strong>实施日期：</strong><span data-k="effectiveDate"></span></div>
+  <div><strong>废止日期：</strong><span data-k="voidDate"></span></div>
+</div>
+<script>
+  (async function () {
+    try {
+      var path = window.location.pathname;
+      var url = '/apis/api.article-id-management.halo.run/v1alpha1/lookup?link=' + encodeURIComponent(path);
+      var res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) return;
+      var data = await res.json();
+      var box = document.getElementById('article-id-block');
+      if (!box || !data || !data.fullCode) return;
+      box.querySelector('[data-k=\"fullCode\"]').textContent = data.fullCode || '';
+      box.querySelector('[data-k=\"statusDisplay\"]').textContent = data.statusDisplay || '';
+      box.querySelector('[data-k=\"issuingAuthority\"]').textContent = data.issuingAuthority || '';
+      box.querySelector('[data-k=\"effectiveDate\"]').textContent = data.effectiveDate || '';
+      box.querySelector('[data-k=\"voidDate\"]').textContent = data.voidDate || '';
+      box.style.display = '';
+    } catch (e) {
+      // 静默降级，不影响正文渲染
+    }
+  })();
+</script>
+```
+
+### 10.3 说明
+- 该方案不依赖页面对象注解，适用于 Post/Docs/未来其他绑定源。
+- 若页面未绑定编号，容器保持隐藏。
+- 若插件不可用或请求失败，脚本静默降级，不影响页面主内容。

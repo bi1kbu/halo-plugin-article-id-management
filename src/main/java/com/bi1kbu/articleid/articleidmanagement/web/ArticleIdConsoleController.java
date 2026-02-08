@@ -33,7 +33,8 @@ public class ArticleIdConsoleController {
     }
 
     @PutMapping("/rules")
-    public RuleConfig updateRules(@Valid @RequestBody UpdateRuleConfigRequest request) {
+    public RuleConfig updateRules(@Valid @RequestBody UpdateRuleConfigRequest request, Principal principal) {
+        String operator = principal != null ? principal.getName() : "system";
         return articleIdService.updateRuleConfig(new RuleConfig(
             request.getPrefix(),
             request.getSerialWidth(),
@@ -41,7 +42,7 @@ public class ArticleIdConsoleController {
             request.isResetPerYear(),
             request.getDepartments(),
             request.getDocTypes()
-        ));
+        ), operator);
     }
 
     @PostMapping("/ledger/preview")

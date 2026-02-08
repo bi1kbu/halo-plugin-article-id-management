@@ -440,6 +440,7 @@ const saveRules = async () => {
       departments: normalizeOptions(resp.data.departments),
       docTypes: normalizeOptions(resp.data.docTypes),
     }
+    await loadAll()
     message.value = '规则配置已保存'
   } catch (err: any) {
     message.value = err?.response?.data?.message || '规则配置保存失败'

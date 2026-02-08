@@ -5,6 +5,7 @@ plugins {
 }
 
 group 'com.bi1kbu.articleid.articleidmanagement'
+version '1.0.4-SNAPSHOT'
 
 repositories {
     mavenCentral()
@@ -48,4 +49,3 @@ tasks.named('classes') {
 halo {
     version = '2.22'
 }
-

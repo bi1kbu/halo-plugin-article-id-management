@@ -14,6 +14,7 @@ public class UpdateLedgerRequest {
     private String articleTitle;
     private String articleLink;
     private String articlePublishedDate;
+    private Boolean autoRefreshBinding;
     private String effectiveDate;
     private String supersededDate;
     private String voidDate;

@@ -9,6 +9,7 @@ import com.bi1kbu.articleid.articleidmanagement.domain.RuleOption;
 import com.bi1kbu.articleid.articleidmanagement.web.dto.GenerateRequest;
 import com.bi1kbu.articleid.articleidmanagement.web.dto.UpdateLedgerRequest;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -108,6 +109,7 @@ public class ArticleIdService {
 
         var now = OffsetDateTime.now();
         var hasBinding = trimToNull(request.getArticleName()) != null;
+        ensureBindingTargetAvailable(state.getLedger(), null, request.getArticleName());
         var entry = LedgerEntry.builder()
             .id(UUID.randomUUID().toString())
             .prefix(config.getPrefix())
@@ -159,6 +161,7 @@ public class ArticleIdService {
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("编号不存在: " + id));
         var oldArticleName = target.getArticleName();
+        var autoRefreshBinding = Boolean.TRUE.equals(request.getAutoRefreshBinding());
         var changes = new ArrayList<OperationLogChange>();
 
         if (request.getStatus() != null) {
@@ -183,21 +186,24 @@ public class ArticleIdService {
             target.setRemark(request.getRemark());
         }
         if (request.getArticleTitle() != null) {
-            appendFieldChange(changes, "绑定文章标题", target.getArticleTitle(), request.getArticleTitle());
+            appendFieldChange(changes, formatField("绑定文章标题", autoRefreshBinding),
+                target.getArticleTitle(), request.getArticleTitle());
             target.setArticleTitle(request.getArticleTitle());
             target.setArticleTitleSnapshot(request.getArticleTitle());
         }
         if (request.getArticleName() != null) {
             appendFieldChange(changes, "绑定文章ID", target.getArticleName(), request.getArticleName());
+            ensureBindingTargetAvailable(state.getLedger(), target.getId(), request.getArticleName());
             target.setArticleName(request.getArticleName());
         }
         if (request.getArticleLink() != null) {
-            appendFieldChange(changes, "绑定文章链接", target.getArticleLink(), request.getArticleLink());
+            appendFieldChange(changes, formatField("绑定文章链接", autoRefreshBinding),
+                target.getArticleLink(), request.getArticleLink());
             target.setArticleLink(request.getArticleLink());
         }
         if (request.getArticlePublishedDate() != null) {
-            appendFieldChange(changes, "绑定文章发布日期", target.getArticlePublishedDate(),
-                request.getArticlePublishedDate());
+            appendFieldChange(changes, formatField("绑定文章发布日期", autoRefreshBinding),
+                target.getArticlePublishedDate(), request.getArticlePublishedDate());
             target.setArticlePublishedDate(request.getArticlePublishedDate());
         }
         if (request.getEffectiveDate() != null) {
@@ -227,6 +233,8 @@ public class ArticleIdService {
         if (request.getStatus() == null) {
             autoAdjustStatusByBinding(target, changes);
         }
+        // 保存时尝试按绑定对象刷新标题/链接/发布日期，避免台账信息滞后
+        refreshBindingSnapshotFromPost(target, changes);
         target.setUpdatedBy(operator);
         target.setUpdatedAt(OffsetDateTime.now());
         if (changes.isEmpty()) {
@@ -290,6 +298,40 @@ public class ArticleIdService {
         if (!hasBinding && target.getStatus() == LedgerStatus.BOUND) {
             appendFieldChange(changes, "状态", LedgerStatus.BOUND.name(), LedgerStatus.REGISTERED.name());
             target.setStatus(LedgerStatus.REGISTERED);
+        }
+    }
+
+    private void refreshBindingSnapshotFromPost(LedgerEntry target, List<OperationLogChange> changes) {
+        var articleName = trimToNull(target.getArticleName());
+        if (articleName == null) {
+            return;
+        }
+        try {
+            var post = extensionClient.fetch(Post.class, articleName).block();
+            if (post == null) {
+                return;
+            }
+            var latestTitle = trimToNull(post.getSpec() != null ? post.getSpec().getTitle() : null);
+            var latestLink = trimToNull(post.getStatus() != null ? post.getStatus().getPermalink() : null);
+            String latestPublishedDate = null;
+            if (post.getSpec() != null && post.getSpec().getPublishTime() != null) {
+                latestPublishedDate = post.getSpec().getPublishTime()
+                    .atZone(ZoneId.of("Asia/Shanghai"))
+                    .toLocalDate()
+                    .toString();
+            }
+
+            appendFieldChange(changes, formatField("绑定文章标题", true), target.getArticleTitle(), latestTitle);
+            appendFieldChange(changes, formatField("绑定文章链接", true), target.getArticleLink(), latestLink);
+            appendFieldChange(changes, formatField("绑定文章发布日期", true), target.getArticlePublishedDate(),
+                latestPublishedDate);
+
+            target.setArticleTitle(latestTitle);
+            target.setArticleTitleSnapshot(latestTitle);
+            target.setArticleLink(latestLink);
+            target.setArticlePublishedDate(latestPublishedDate);
+        } catch (Exception ex) {
+            log.debug("刷新绑定文章信息失败, articleName={}", articleName, ex);
         }
     }
 
@@ -534,6 +576,19 @@ public class ArticleIdService {
         }
     }
 
+    private void ensureBindingTargetAvailable(List<LedgerEntry> ledger, String currentLedgerId, String targetName) {
+        var normalizedTarget = trimToNull(targetName);
+        if (normalizedTarget == null || ledger == null) {
+            return;
+        }
+        var duplicated = ledger.stream()
+            .filter(item -> item != null && !Objects.equals(item.getId(), currentLedgerId))
+            .anyMatch(item -> normalizedTarget.equalsIgnoreCase(trimToNull(item.getArticleName())));
+        if (duplicated) {
+            throw new IllegalArgumentException("绑定对象已被占用: " + normalizedTarget);
+        }
+    }
+
     private void appendLog(com.bi1kbu.articleid.articleidmanagement.domain.PluginState state, String action,
         String operator, String targetId, String targetCode, String detail, List<OperationLogChange> changes) {
         state.getLogs().add(OperationLog.builder()
@@ -566,5 +621,12 @@ public class ArticleIdService {
             return "-";
         }
         return value;
+    }
+
+    private String formatField(String field, boolean auto) {
+        if (!auto) {
+            return field;
+        }
+        return field + "[自动]";
     }
 }

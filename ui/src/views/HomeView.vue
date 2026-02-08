@@ -260,19 +260,36 @@ const filteredUpdateLedger = computed(() => {
 })
 const selectedUpdateItem = computed(() => ledger.value.find((item) => item.id === updateForm.value.id) || null)
 const filteredRegisterPostOptions = computed(() => {
+  const available = availableRegisterPostOptions.value
   const keyword = registerPostKeyword.value.trim().toLowerCase()
   if (!keyword) {
-    return postOptions.value
+    return available
   }
-  return postOptions.value.filter((item) => `${item.title} ${item.permalink}`.toLowerCase().includes(keyword))
+  return available.filter((item) => `${item.title} ${item.permalink}`.toLowerCase().includes(keyword))
 })
 const filteredUpdatePostOptions = computed(() => {
+  const available = availableUpdatePostOptions.value
   const keyword = updatePostKeyword.value.trim().toLowerCase()
   if (!keyword) {
-    return postOptions.value
+    return available
   }
-  return postOptions.value.filter((item) => `${item.title} ${item.permalink}`.toLowerCase().includes(keyword))
+  return available.filter((item) => `${item.title} ${item.permalink}`.toLowerCase().includes(keyword))
 })
+const occupiedBindingNames = computed(() => {
+  const names = new Set<string>()
+  ledger.value.forEach((item) => {
+    if (item.articleName) {
+      names.add(item.articleName)
+    }
+  })
+  return names
+})
+const availableRegisterPostOptions = computed(() =>
+  postOptions.value.filter((item) => !occupiedBindingNames.value.has(item.name)),
+)
+const availableUpdatePostOptions = computed(() =>
+  postOptions.value.filter((item) => item.name === updateForm.value.articleName || !occupiedBindingNames.value.has(item.name)),
+)
 
 const canView = computed(() => hasPermission(['article-id-management:view', 'article-id-management:create', 'article-id-management:modify', 'article-id-management:manage']))
 const canCreate = computed(() => hasPermission(['article-id-management:create', 'article-id-management:manage']))
@@ -466,11 +483,56 @@ const buildPayload = () => ({
   articlePublishedDate: registerForm.value.articlePublishedDate || null,
 })
 
-const applyPostToRegister = (selectedName?: string) => {
+const isLikelyUrl = (value: string) => {
+  const input = value.trim()
+  return /^(https?:\/\/|\/)/i.test(input)
+}
+
+const toRelativePath = (input: string) => {
+  const normalized = input.trim()
+  const parsed = new URL(normalized, window.location.origin)
+  if (parsed.origin !== window.location.origin) {
+    throw new Error('仅支持本站 URL')
+  }
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`
+}
+
+const resolveBindingFromUrl = async (input: string): Promise<PostOption | null> => {
+  try {
+    const relativePath = toRelativePath(input)
+    const resp = await fetch(relativePath, { method: 'GET', credentials: 'include' })
+    if (!resp.ok) {
+      return null
+    }
+    const html = await resp.text()
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const titleText = (doc.querySelector('title')?.textContent || '').trim()
+    const fallbackTitle = relativePath.split('/').pop() || relativePath
+    return {
+      name: relativePath,
+      title: titleText || fallbackTitle,
+      permalink: relativePath,
+      publishDate: '',
+    }
+  } catch {
+    return null
+  }
+}
+
+const applyPostToRegister = async (selectedName?: string) => {
   const pickName = selectedName || registerPickPostName.value
-  if (!pickName) return
-  const target = postOptions.value.find((item) => item.name === pickName)
-  if (!target) return
+  let target = pickName ? postOptions.value.find((item) => item.name === pickName) : undefined
+  if (!target && !pickName && isLikelyUrl(registerPostKeyword.value)) {
+    const urlTarget = await resolveBindingFromUrl(registerPostKeyword.value)
+    if (urlTarget) {
+      target = urlTarget
+      registerPickPostName.value = ''
+    }
+  }
+  if (!target) {
+    message.value = pickName ? '未找到对应绑定对象' : '请选择对象，或输入本站 URL 后点击选择'
+    return
+  }
   registerPickPostName.value = target.name
   registerForm.value.articleName = target.name
   registerForm.value.articleTitle = target.title
@@ -478,11 +540,20 @@ const applyPostToRegister = (selectedName?: string) => {
   registerForm.value.articlePublishedDate = target.publishDate ? target.publishDate.slice(0, 10) : ''
 }
 
-const applyPostToUpdate = (selectedName?: string) => {
+const applyPostToUpdate = async (selectedName?: string) => {
   const pickName = selectedName || updatePickPostName.value
-  if (!pickName) return
-  const target = postOptions.value.find((item) => item.name === pickName)
-  if (!target) return
+  let target = pickName ? postOptions.value.find((item) => item.name === pickName) : undefined
+  if (!target && !pickName && isLikelyUrl(updatePostKeyword.value)) {
+    const urlTarget = await resolveBindingFromUrl(updatePostKeyword.value)
+    if (urlTarget) {
+      target = urlTarget
+      updatePickPostName.value = ''
+    }
+  }
+  if (!target) {
+    message.value = pickName ? '未找到对应绑定对象' : '请选择对象，或输入本站 URL 后点击选择'
+    return
+  }
   updatePickPostName.value = target.name
   updateForm.value.articleName = target.name
   updateForm.value.articleTitle = target.title
@@ -491,11 +562,11 @@ const applyPostToUpdate = (selectedName?: string) => {
 }
 const onRegisterPostSelectChange = (event: Event) => {
   const value = (event.target as HTMLSelectElement).value
-  applyPostToRegister(value)
+  void applyPostToRegister(value)
 }
 const onUpdatePostSelectChange = (event: Event) => {
   const value = (event.target as HTMLSelectElement).value
-  applyPostToUpdate(value)
+  void applyPostToUpdate(value)
 }
 
 const preview = async () => {
@@ -571,6 +642,23 @@ const updateLedger = async () => {
   updatingLedger.value = true
   message.value = ''
   try {
+    let autoRefreshBinding = false
+    const bindName = (updateForm.value.articleName || '').trim()
+    const bindLink = (updateForm.value.articleLink || '').trim()
+    const refreshSource = bindName && isLikelyUrl(bindName)
+      ? bindName
+      : (bindLink && isLikelyUrl(bindLink) ? bindLink : '')
+    if (refreshSource) {
+      const latest = await resolveBindingFromUrl(refreshSource)
+      if (latest) {
+        updateForm.value.articleTitle = latest.title || updateForm.value.articleTitle
+        updateForm.value.articleLink = latest.permalink || updateForm.value.articleLink
+        updateForm.value.articlePublishedDate = latest.publishDate
+          ? latest.publishDate.slice(0, 10)
+          : updateForm.value.articlePublishedDate
+        autoRefreshBinding = true
+      }
+    }
     await axios.patch(`${baseUrl}/ledger/${updateForm.value.id}`, {
       status: updateForm.value.status,
       replacesCode: joinCodes(updateForm.value.replacesCode),
@@ -578,9 +666,8 @@ const updateLedger = async () => {
       dependencyCodes: joinCodes(updateForm.value.dependencyCodes),
       remark: updateForm.value.remark,
       articleName: updateForm.value.articleName || null,
-      articleTitle: updateForm.value.articleTitle,
-      articleLink: updateForm.value.articleLink,
       articlePublishedDate: updateForm.value.articlePublishedDate || null,
+      autoRefreshBinding,
       effectiveDate: updateForm.value.effectiveDate || null,
       supersededDate: updateForm.value.supersededDate || null,
       voidDate: updateForm.value.voidDate || null,
@@ -879,6 +966,7 @@ onMounted(loadAll)
         </label>
         <label class="field-full">
           绑定文章（选择器）
+          <p class="hint">已绑定对象不会重复出现在列表中；若无匹配，可输入本站 URL 后点击选择。</p>
           <div class="post-picker">
             <input v-model="registerPostKeyword" type="text" placeholder="搜索文章标题或链接" />
             <select v-model="registerPickPostName" @change="onRegisterPostSelectChange">
@@ -887,7 +975,7 @@ onMounted(loadAll)
                 {{ item.title }} {{ item.permalink ? `(${item.permalink})` : '' }}
               </option>
             </select>
-            <button type="button" class="small" @click="() => applyPostToRegister()">选择</button>
+            <button type="button" class="small" @click="() => void applyPostToRegister()">选择</button>
           </div>
         </label>
         <label>
@@ -1019,6 +1107,7 @@ onMounted(loadAll)
         <div class="grid compact">
           <label>
             绑定文章（选择器）
+            <p class="hint">已绑定对象不会重复出现在列表中；若无匹配，可输入本站 URL 后点击选择。</p>
             <div class="post-picker">
               <input v-model="updatePostKeyword" type="text" placeholder="搜索文章标题或链接" />
               <select v-model="updatePickPostName" @change="onUpdatePostSelectChange">
@@ -1027,16 +1116,16 @@ onMounted(loadAll)
                   {{ item.title }} {{ item.permalink ? `(${item.permalink})` : '' }}
                 </option>
               </select>
-              <button type="button" class="small" @click="() => applyPostToUpdate()">选择</button>
+              <button type="button" class="small" @click="() => void applyPostToUpdate()">选择</button>
             </div>
           </label>
           <label>
             绑定文章标题
-            <input v-model="updateForm.articleTitle" type="text" placeholder="文章标题" />
+            <span class="value-label">{{ updateForm.articleTitle || '-' }}</span>
           </label>
           <label>
             绑定文章链接
-            <input v-model="updateForm.articleLink" type="text" placeholder="https://..." />
+            <span class="value-label mono">{{ updateForm.articleLink || '-' }}</span>
           </label>
           <label>
             绑定文章发布日期
@@ -1561,6 +1650,15 @@ label {
   background: #f1f5f9 !important;
   border-color: #d1d9e6 !important;
   color: #475569 !important;
+}
+
+.value-label {
+  display: inline-block;
+  min-height: 22px;
+  line-height: 1.5;
+  font-size: 14px;
+  color: #334155;
+  word-break: break-all;
 }
 
 .mono {

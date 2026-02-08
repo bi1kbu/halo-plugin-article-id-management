@@ -14,6 +14,8 @@ public class RuleConfig {
     private int serialWidth = 4;
     private String codePattern = "{前缀}-{部门编码}/{文件类型}-{流水号}{子文件片段}/{年份}{修订片段}";
     private boolean resetPerYear = true;
+    private String bindingSourceType = "POST";
+    private String bindingSourceUrl = "";
     private List<RuleOption> departments = new ArrayList<>();
     private List<RuleOption> docTypes = new ArrayList<>();
 }

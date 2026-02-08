@@ -12,6 +12,8 @@ public final class DefaultRules {
             4,
             "{前缀}-{部门编码}/{文件类型}-{流水号}{子文件片段}/{年份}{修订片段}",
             true,
+            "POST",
+            "",
             List.of(
                 new RuleOption("A", "大会"),
                 new RuleOption("P", "主席团"),

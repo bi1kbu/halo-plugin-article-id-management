@@ -35,11 +35,14 @@ public class ArticleIdConsoleController {
     @PutMapping("/rules")
     public RuleConfig updateRules(@Valid @RequestBody UpdateRuleConfigRequest request, Principal principal) {
         String operator = principal != null ? principal.getName() : "system";
+        var current = articleIdService.getRuleConfig();
         return articleIdService.updateRuleConfig(new RuleConfig(
             request.getPrefix(),
             request.getSerialWidth(),
             request.getCodePattern(),
             request.isResetPerYear(),
+            current != null ? current.getBindingSourceType() : "POST",
+            current != null ? current.getBindingSourceUrl() : "",
             request.getDepartments(),
             request.getDocTypes()
         ), operator);

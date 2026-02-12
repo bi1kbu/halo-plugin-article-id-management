@@ -5,7 +5,39 @@ plugins {
 }
 
 group 'com.bi1kbu.articleid.articleidmanagement'
-version '1.0.19-SNAPSHOT'
+def gradlePropsFile = file('gradle.properties')
+if (!gradlePropsFile.exists()) {
+    throw new GradleException("Missing gradle.properties")
+}
+
+def propsText = gradlePropsFile.getText('UTF-8')
+def versionMatcher = (propsText =~ /(?m)^version\s*=\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$/)
+if (!versionMatcher.find()) {
+    throw new GradleException("Missing or invalid 'version' in gradle.properties, expected x.y.z")
+}
+
+def bumpPatchVersion = { String rawVersion ->
+    def parts = rawVersion.tokenize('.').collect { it as Integer }
+    [parts[0], parts[1], parts[2] + 1].join('.')
+}
+
+def currentVersion = versionMatcher.group(1)
+def requestedTaskNames = gradle.startParameter.taskNames.collect { it.tokenize(':').last() }
+def shouldAutoBumpVersion = requestedTaskNames.any { it in ['build', 'assemble', 'jar'] }
+def effectiveVersion = currentVersion
+
+if (shouldAutoBumpVersion) {
+    def nextVersion = bumpPatchVersion(currentVersion)
+    def updatedPropsText = propsText.replaceFirst(
+        /(?m)^version\s*=\s*[0-9]+\.[0-9]+\.[0-9]+\s*$/,
+        "version=${nextVersion}".toString()
+    )
+    gradlePropsFile.write(updatedPropsText, 'UTF-8')
+    effectiveVersion = nextVersion.toString()
+    logger.lifecycle("Auto bumped plugin version: ${currentVersion} -> ${nextVersion}")
+}
+
+version = effectiveVersion.toString()
 
 repositories {
     mavenCentral()

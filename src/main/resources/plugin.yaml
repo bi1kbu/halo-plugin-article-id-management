@@ -15,8 +15,8 @@ spec:
   homepage: https://github.com/bi1kbu/article-id-management#readme
   repo: https://github.com/bi1kbu/article-id-management
   issues: https://github.com/bi1kbu/article-id-management/issues
-  displayName: "article-id-management"
+  displayName: "文件编号管理"
   description: "本插件用于文件编号管理、文档编号管理，由机魂社（MSIEFA.ORG）开发"
   license:
-    - name: "GPL-3.0"
-      url: "https://github.com/bi1kbu/article-id-management/blob/main/LICENSE"
+    - name: "MIT"
+      url: "https://opensource.org/licenses/MIT"

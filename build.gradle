@@ -23,7 +23,7 @@ def bumpPatchVersion = { String rawVersion ->
 
 def currentVersion = versionMatcher.group(1)
 def requestedTaskNames = gradle.startParameter.taskNames.collect { it.tokenize(':').last() }
-def shouldAutoBumpVersion = requestedTaskNames.any { it in ['build', 'assemble', 'jar'] }
+def shouldAutoBumpVersion = requestedTaskNames.any { it in ['releaseBuild', 'releaseJar'] }
 def effectiveVersion = currentVersion
 
 if (shouldAutoBumpVersion) {
@@ -38,6 +38,24 @@ if (shouldAutoBumpVersion) {
 }
 
 version = effectiveVersion.toString()
+
+tasks.register('devBuild') {
+    group = 'build'
+    description = 'Build plugin for development without bumping version.'
+    dependsOn tasks.named('build')
+}
+
+tasks.register('releaseJar') {
+    group = 'build'
+    description = 'Bump patch version in gradle.properties and package jar.'
+    dependsOn tasks.named('jar')
+}
+
+tasks.register('releaseBuild') {
+    group = 'build'
+    description = 'Bump patch version in gradle.properties and run full build.'
+    dependsOn tasks.named('build')
+}
 
 repositories {
     mavenCentral()

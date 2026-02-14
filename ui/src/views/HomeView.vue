@@ -179,7 +179,7 @@ const updateKeyword = ref('')
 const ledgerFilter = ref({
   deptCodes: [] as string[],
   docTypes: [] as string[],
-  statuses: ['REGISTERED', 'BOUND', 'SUPERSEDED', 'VOID'] as string[],
+  statuses: ['REGISTERED', 'BOUND_PENDING', 'BOUND_EFFECTIVE'] as string[],
   keyword: '',
 })
 const logFilter = ref({
@@ -401,10 +401,9 @@ function normalizePostOption(item: any): PostOption | null {
 const loadAll = async () => {
   loading.value = true
   try {
-    const [ruleResp, ledgerResp, postResp] = await Promise.all([
+    const [ruleResp, ledgerResp] = await Promise.all([
       axios.get(`${baseUrl}/rules`),
       axios.get(`${baseUrl}/ledger`),
-      axios.get('/apis/api.content.halo.run/v1alpha1/posts?page=1&size=200'),
     ])
     rules.value = {
       codePattern: '{前缀}-{部门编码}/{文件类型}-{流水号}{子文件片段}/{年份}{修订片段}',
@@ -415,9 +414,15 @@ const loadAll = async () => {
     ledger.value = Array.isArray(ledgerResp.data)
       ? ledgerResp.data.map((item: any) => normalizeLedgerItem(item)).filter(Boolean) as LedgerItem[]
       : []
-    postOptions.value = Array.isArray(postResp?.data?.items)
-      ? postResp.data.items.map((item: any) => normalizePostOption(item)).filter(Boolean) as PostOption[]
-      : []
+    try {
+      const postResp = await axios.get('/apis/api.content.halo.run/v1alpha1/posts?page=1&size=200')
+      postOptions.value = Array.isArray(postResp?.data?.items)
+        ? postResp.data.items.map((item: any) => normalizePostOption(item)).filter(Boolean) as PostOption[]
+        : []
+    } catch {
+      // Some roles can use this plugin without content-module permissions.
+      postOptions.value = []
+    }
     try {
       const logResp = await axios.get(`${baseUrl}/logs`)
       logs.value = logResp.data
@@ -809,7 +814,7 @@ const resetLedgerFilter = () => {
   ledgerFilter.value = {
     deptCodes: [],
     docTypes: [],
-    statuses: ['REGISTERED', 'BOUND', 'SUPERSEDED', 'VOID'],
+    statuses: ['REGISTERED', 'BOUND_PENDING', 'BOUND_EFFECTIVE'],
     keyword: '',
   }
   ledgerPagination.value.page = 1

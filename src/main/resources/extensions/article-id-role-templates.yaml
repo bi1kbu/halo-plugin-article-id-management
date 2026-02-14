@@ -12,9 +12,9 @@ metadata:
 rules:
   - apiGroups: ["api.article-id-management.console"]
     resources:
-      - "article-id-management/rules"
-      - "article-id-management/ledger"
-      - "article-id-management/logs"
+      - "rules"
+      - "ledger"
+      - "logs"
     verbs: ["get", "list"]
 ---
 apiVersion: v1alpha1
@@ -33,9 +33,9 @@ metadata:
 rules:
   - apiGroups: ["api.article-id-management.console"]
     resources:
-      - "article-id-management/ledger/register"
-      - "article-id-management/ledger/preview"
-      - "article-id-management/ledger"
+      - "ledger/register"
+      - "ledger/preview"
+      - "ledger"
     verbs: ["create", "patch", "get", "list"]
 ---
 apiVersion: v1alpha1
@@ -54,8 +54,8 @@ metadata:
 rules:
   - apiGroups: ["api.article-id-management.console"]
     resources:
-      - "article-id-management/ledger"
-      - "article-id-management/ledger/preview"
+      - "ledger"
+      - "ledger/preview"
     verbs: ["get", "list", "patch", "update", "create"]
 ---
 apiVersion: v1alpha1
@@ -74,10 +74,10 @@ metadata:
 rules:
   - apiGroups: ["api.article-id-management.console"]
     resources:
-      - "article-id-management/rules"
-      - "article-id-management/ledger"
-      - "article-id-management/ledger/register"
-      - "article-id-management/ledger/preview"
-      - "article-id-management/ledger/mark-delete"
-      - "article-id-management/logs"
+      - "rules"
+      - "ledger"
+      - "ledger/register"
+      - "ledger/preview"
+      - "ledger/mark-delete"
+      - "logs"
     verbs: ["*"]
